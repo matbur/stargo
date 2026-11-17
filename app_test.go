@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/matbur/stargo"
-	"github.com/matbur/stargo/internal/views"
+	"github.com/matbur/stargo/examples/hello/app"
 	"github.com/matbur/stargo/route"
 	"github.com/matbur/stargo/trace"
 )
@@ -351,10 +351,10 @@ func TestMethodlessRouteAcceptsEveryMethod(t *testing.T) {
 func TestRenderingIntegration(t *testing.T) {
 	t.Parallel()
 
-	app := newApp(t)
-	app.Handle(route.Get("/"), func(c *stargo.Ctx) error { return c.HTML(views.Page(0, "/live")) })
+	application := newApp(t)
+	application.Handle(route.Get("/"), func(c *stargo.Ctx) error { return c.HTML(app.Page(0, "/live")) })
 
-	recorder := serve(app, http.MethodGet, "/")
+	recorder := serve(application, http.MethodGet, "/")
 	if recorder.Code != 200 {
 		t.Fatalf("status = %d", recorder.Code)
 	}

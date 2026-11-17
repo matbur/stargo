@@ -3,14 +3,14 @@ package main
 import (
 	"log"
 
-	"github.com/matbur/stargo/internal/example"
+	"github.com/matbur/stargo/examples/hello/app"
 )
 
 func main() {
-	app := example.New()
-	defer app.Close()
+	application := app.New()
+	defer application.Close()
 
-	if err := app.ListenAndServe(":8080"); err != nil {
+	if err := application.ListenAndServe(":8080"); err != nil {
 		log.Fatal(err)
 	}
 }

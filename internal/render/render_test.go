@@ -10,8 +10,8 @@ import (
 
 	g "maragu.dev/gomponents"
 
+	"github.com/matbur/stargo/examples/hello/app"
 	"github.com/matbur/stargo/internal/render"
-	"github.com/matbur/stargo/internal/views"
 )
 
 type contextRenderer struct {
@@ -60,7 +60,7 @@ func TestAcceptedForms(t *testing.T) {
 		{"writer renderer", withWriter, "<i>writer</i>"},
 		{"string", "<u>raw</u>", "<u>raw</u>"},
 		{"bytes", []byte("<em>raw</em>"), "<em>raw</em>"},
-		{"gomponents node", views.Page(0, "/live"), ""},
+		{"gomponents node", app.Page(0, "/live"), ""},
 	}
 
 	for _, test := range tests {
@@ -89,7 +89,7 @@ func TestAcceptedForms(t *testing.T) {
 func TestGomponentsBytesMatchDirectRender(t *testing.T) {
 	t.Parallel()
 
-	page := views.Page(0, "/live")
+	page := app.Page(0, "/live")
 	want, err := render.HTML(context.Background(), g.Node(page))
 	if err != nil {
 		t.Fatalf("HTML() error = %v", err)

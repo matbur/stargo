@@ -1,4 +1,4 @@
-package example_test
+package app_test
 
 import (
 	"bufio"
@@ -13,16 +13,16 @@ import (
 	"time"
 
 	"github.com/matbur/stargo"
-	"github.com/matbur/stargo/internal/example"
+	"github.com/matbur/stargo/examples/hello/app"
 	"github.com/matbur/stargo/route"
 )
 
 func TestPageRendersAndLinksResolve(t *testing.T) {
 	t.Parallel()
 
-	app := example.New(stargo.WithTracer(nil))
+	application := app.New(stargo.WithTracer(nil))
 	recorder := httptest.NewRecorder()
-	app.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
+	application.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d", recorder.Code)
@@ -35,7 +35,7 @@ func TestPageRendersAndLinksResolve(t *testing.T) {
 		t.Fatalf("live stream is not connected: %q", body)
 	}
 
-	registered := []route.Route{example.Home, example.Live, example.Command}
+	registered := []route.Route{app.Home, app.Live, app.Command}
 	resolves := func(href string) bool {
 		for _, handle := range registered {
 			if href == handle.Href() {
@@ -54,13 +54,13 @@ func TestPageRendersAndLinksResolve(t *testing.T) {
 			t.Fatalf("href %q does not resolve to a registered route", match[1])
 		}
 	}
-	if !resolves(example.Live.Href()) {
+	if !resolves(app.Live.Href()) {
 		t.Fatal("live route does not build its own href")
 	}
 }
 
 func TestLiveStreamReceivesPublishedPatch(t *testing.T) {
-	app := example.New(stargo.WithTracer(nil))
+	application := app.New(stargo.WithTracer(nil))
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -70,7 +70,7 @@ func TestLiveStreamReceivesPublishedPatch(t *testing.T) {
 	ctx, cancelServer := context.WithCancel(context.Background())
 	defer cancelServer()
 	serveErr := make(chan error, 1)
-	go func() { serveErr <- app.Serve(ctx, listener) }()
+	go func() { serveErr <- application.Serve(ctx, listener) }()
 
 	requestCtx, cancelRequest := context.WithCancel(ctx)
 	request, err := http.NewRequestWithContext(requestCtx, http.MethodGet, baseURL+"/live", nil)

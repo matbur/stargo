@@ -1,6 +1,5 @@
-// Package example wires the runnable counter application used by
-// examples/hello.
-package example
+// Package app wires the runnable counter application used by examples/hello.
+package app
 
 import (
 	"context"
@@ -9,7 +8,6 @@ import (
 	"time"
 
 	"github.com/matbur/stargo"
-	"github.com/matbur/stargo/internal/views"
 	"github.com/matbur/stargo/relay"
 	"github.com/matbur/stargo/route"
 	"github.com/matbur/stargo/signals"
@@ -33,7 +31,7 @@ func New(opts ...stargo.Option) *stargo.App {
 	var count atomic.Int64
 
 	app.Handle(Home, func(c *stargo.Ctx) error {
-		return c.HTML(views.Page(count.Load(), Live.Href()))
+		return c.HTML(Page(count.Load(), Live.Href()))
 	})
 	app.Handle(Live, live(hub, &count))
 	app.Handle(Command, command(hub, &count))
@@ -55,7 +53,7 @@ func live(hub *relay.Relay[int64], count *atomic.Int64) stargo.Handler {
 		defer subscription.Close()
 
 		if err := stream.PatchElements(
-			views.Counter(count.Load()),
+			Counter(count.Load()),
 			sse.WithSelector("#counter"),
 			sse.WithMode(sse.ModeOuter),
 		); err != nil {
@@ -90,7 +88,7 @@ func live(hub *relay.Relay[int64], count *atomic.Int64) stargo.Handler {
 				return err
 			}
 			if err := stream.PatchElements(
-				views.Counter(value),
+				Counter(value),
 				sse.WithSelector("#counter"),
 				sse.WithMode(sse.ModeOuter),
 			); err != nil {
