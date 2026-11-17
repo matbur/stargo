@@ -258,6 +258,26 @@ The writer is batched and bounded: 512 spans or 125 ms per flush, a bounded
 queue, and dropped spans counted (visible through `Tracer.DroppedSpans`). A full
 queue never blocks a request. `Close` drains the queue before closing the file.
 
+## Examples
+
+Three runnable examples build up the framework:
+
+| Example | Shows |
+|---|---|
+| [`examples/hello-world`](examples/hello-world/) | One route, one handler, one page, no JavaScript |
+| [`examples/hello`](examples/hello/) | The live-page model with Datastar and a relay |
+| [`examples/chat-room`](examples/chat-room/) | Lobby, per-room pages, SQLite, identity, and live streams |
+
+```sh
+make run-hello-world   # http://localhost:8080
+make run              # the counter from examples/hello
+make run-chat-room    # the chat room, with its own module
+```
+
+`examples/chat-room` is a separate Go module so SQLite never becomes a
+dependency of the framework. Its README covers routes, persistence, and the
+pinned Datastar CDN requirement; `make test-examples` runs both example gates.
+
 ## Development
 
 ```sh
@@ -267,7 +287,8 @@ go build ./...
 ```
 
 `make test`, `make vet`, `make race`, `make build`, and `make run` wrap the same
-commands.
+commands. `make test-examples` runs the hello-world tests and the full
+chat-room gate inside its module.
 
 ## Not included
 
