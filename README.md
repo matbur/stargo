@@ -325,6 +325,10 @@ go build ./...
 commands. `make test-examples` runs the hello-world tests and the full
 chat-room gate inside its module.
 
+`make bench` runs the rendering microbenchmarks and the in-process HTTP/SSE
+benchmarks. See [`benchmarks/README.md`](benchmarks/README.md) for the case list
+and how to read the numbers.
+
 ## Not included
 
 No static asset pipeline, forms, cookies or sessions, authentication, HTTP/2

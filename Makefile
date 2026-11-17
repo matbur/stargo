@@ -1,4 +1,4 @@
-.PHONY: test vet race build run run-hello-world run-chat-room test-examples
+.PHONY: test vet race bench build run run-hello-world run-chat-room test-examples
 
 test:
 	go test ./...
@@ -8,6 +8,9 @@ vet:
 
 race:
 	go test -race ./...
+
+bench:
+	go test -run '^$$' -bench . -benchmem ./...
 
 build:
 	go build ./...
