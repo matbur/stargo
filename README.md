@@ -5,6 +5,7 @@ A small Go web framework modeled on [Stario](https://github.com/stariodev/stario
 - HTML built in Go with [gomponents](https://maragu.dev/gomponents), no adapter package.
 - Live pages over Datastar Server-Sent Events.
 - A process-local relay for waking live handlers.
+- Human-readable console output in a terminal: startup, requests, shutdown.
 - Request tracing as newline-delimited JSON, off by default.
 - `net/http` underneath, with a framework-owned server lifecycle.
 
@@ -181,6 +182,40 @@ return stargo.NewHTTPError(http.StatusNotFound, "no such room")
 Any other error becomes `500` with a generic body, while the real message is
 kept in the request span. If the response already started, the connection is
 aborted instead of appending an error body.
+
+## Console output
+
+When standard output is a terminal, starting the server prints a startup
+block, one line per finished request, and a shutdown block:
+
+```
+18:20:15 ● server.startup                                                                       29µs
+           app.name=hello listen_mode=tcp host=127.0.0.1 port=8080 tls=false listening=true
+           graceful_shutdown_timeout=10s
+           timeout  request_header=5s keep_alive=2m0s
+18:20:40 ● GET /  200                                                                          965µs
+18:20:46 ● server.shutdown                                                                     477µs
+         │ shutdown  trigger=expected_stop open_connections=2 urgent=false idle_closed=2
+         │           force_closed=0 aborted=0 stale_connections=0 cancelled_tasks=0
+         └◦ server.shutdown.closed                                                            +328µs
+```
+
+| Variable | Meaning |
+|---|---|
+| `STARGO_CONSOLE` | `auto` (default): only when stdout is a terminal. `1`, `true`, `on`: always. `0`, `off`, `false`: never. |
+| `NO_COLOR` | Set to any value to disable ANSI styling. |
+| `COLUMNS` | Terminal width; lines use one cell less, capped at 100. |
+
+Serve options override the environment:
+
+```go
+app.Serve(ctx, listener, stargo.Console(os.Stderr)) // explicit destination
+app.Serve(ctx, listener, stargo.NoConsole())        // disable
+```
+
+`stargo.WithName("hello")` sets the startup name; the default is the executable
+base name. Console output is independent of tracing: it works with `TRACE` off,
+and enabling it does not change the NDJSON export.
 
 ## Tracing
 

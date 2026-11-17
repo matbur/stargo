@@ -10,6 +10,8 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/matbur/stargo/internal/console"
 )
 
 // ServeOption configures the HTTP server started by Serve or ListenAndServe.
@@ -20,6 +22,7 @@ type serveConfig struct {
 	readHeaderTimeout time.Duration
 	idleTimeout       time.Duration
 	configure         func(*http.Server)
+	console           *consoleTarget
 }
 
 func defaultServeConfig() serveConfig {
@@ -77,6 +80,11 @@ func (a *App) Serve(ctx context.Context, ln net.Listener, opts ...ServeOption) e
 		opt(&cfg)
 	}
 
+	startupStart := time.Now()
+	writer := resolveConsole(cfg.console)
+	a.console.Store(writer)
+	defer a.console.Store(nil)
+
 	// Shut down when either the caller's context or the application root is
 	// cancelled.
 	runCtx, cancelRun := context.WithCancel(ctx)
@@ -98,6 +106,27 @@ func (a *App) Serve(ctx context.Context, ln net.Listener, opts ...ServeOption) e
 		cfg.configure(server)
 	}
 
+	stats := newConnStats()
+	userConnState := server.ConnState
+	server.ConnState = func(conn net.Conn, state http.ConnState) {
+		stats.observe(conn, state)
+		if userConnState != nil {
+			userConnState(conn, state)
+		}
+	}
+
+	if writer != nil {
+		startupCfg := cfg
+		startupCfg.readHeaderTimeout = server.ReadHeaderTimeout
+		startupCfg.idleTimeout = server.IdleTimeout
+		writer.Write(console.Block{
+			Start:    startupStart,
+			Name:     "server.startup",
+			Duration: time.Since(startupStart),
+			Attrs:    startupAttrs(a, ln, startupCfg),
+		})
+	}
+
 	defer a.tracer.Close()
 	startup := a.tracer.Start("startup", "startup")
 	startup.Attr("server.addr", ln.Addr().String())
@@ -113,8 +142,17 @@ func (a *App) Serve(ctx context.Context, ln net.Listener, opts ...ServeOption) e
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
+		if writer != nil {
+			open := stats.openCount()
+			writer.Write(shutdownBlock("runtime_failure", time.Now(), stats.snapshot(open, 0, 0), err))
+		}
 		return err
 	case <-runCtx.Done():
+		shutdownStart := time.Now()
+		open := stats.openCount()
+		cancelled := int(a.inflight.Load())
+		stats.beginShutdown()
+
 		// Cancel request contexts first: Shutdown waits for handlers but does
 		// not cancel them, and a live stream would wait forever.
 		a.cancel()
@@ -123,14 +161,27 @@ func (a *App) Serve(ctx context.Context, ln net.Listener, opts ...ServeOption) e
 		defer shutdownCancel()
 
 		shutdownErr := server.Shutdown(shutdownCtx)
+		aborted := 0
 		if shutdownErr != nil {
+			aborted = stats.openCount()
 			_ = server.Close()
-			<-errCh
-			return shutdownErr
+		}
+		serveErr := <-errCh
+
+		trigger := "expected_stop"
+		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+			trigger = "runtime_failure"
+		}
+		if writer != nil {
+			counts := stats.snapshot(open, cancelled, aborted)
+			writer.Write(shutdownBlock(trigger, shutdownStart, counts, shutdownErr))
 		}
 
-		if err := <-errCh; err != nil && !errors.Is(err, http.ErrServerClosed) {
-			return err
+		if shutdownErr != nil {
+			return shutdownErr
+		}
+		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+			return serveErr
 		}
 		return nil
 	}

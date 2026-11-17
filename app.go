@@ -3,8 +3,12 @@ package stargo
 import (
 	"context"
 	"net/http"
+	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
+	"github.com/matbur/stargo/internal/console"
 	"github.com/matbur/stargo/route"
 	"github.com/matbur/stargo/trace"
 )
@@ -26,13 +30,24 @@ func WithTracer(tracer *trace.Tracer) Option {
 	}
 }
 
+// WithName sets the application name shown in console output. Without it the
+// executable base name is used.
+func WithName(name string) Option {
+	return func(a *App) {
+		a.name = strings.TrimSpace(name)
+	}
+}
+
 // App is an HTTP application: a mux, middleware, and a tracer.
 type App struct {
 	mux        *http.ServeMux
 	middleware []Middleware
 	tracer     *trace.Tracer
+	name       string
 	rootCtx    context.Context
 	cancel     context.CancelFunc
+	console    atomic.Pointer[console.Writer]
+	inflight   atomic.Int64
 
 	mu    sync.Mutex
 	chain http.Handler
@@ -82,6 +97,10 @@ func (a *App) Close() error {
 
 // ServeHTTP implements http.Handler.
 func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	a.inflight.Add(1)
+	defer a.inflight.Add(-1)
+	started := time.Now()
+
 	a.mu.Lock()
 	chain := a.chain
 	if chain == nil {
@@ -105,6 +124,20 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		span.Attr("http.path", r.URL.Path)
 		span.Attr("http.status", status)
 		span.End()
+	}
+
+	if writer := a.console.Load(); writer != nil {
+		status := recorder.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		writer.Write(console.Block{
+			Start:    started,
+			Name:     r.Method + " " + r.URL.Path,
+			Status:   status,
+			Failed:   status >= 500,
+			Duration: time.Since(started),
+		})
 	}
 }
 

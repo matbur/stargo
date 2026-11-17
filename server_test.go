@@ -10,6 +10,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -158,10 +160,11 @@ func TestShutdownTimeoutReturnsDeadline(t *testing.T) {
 
 	listener := listen(t)
 	defer listener.Close()
+	buffer := &lockedBuffer{}
 	errCh := make(chan error, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
-		errCh <- app.Serve(ctx, listener, ShutdownTimeout(50*time.Millisecond))
+		errCh <- app.Serve(ctx, listener, ShutdownTimeout(50*time.Millisecond), Console(buffer))
 	}()
 
 	_ = getAsync("http://" + listener.Addr().String() + "/")
@@ -181,6 +184,18 @@ func TestShutdownTimeoutReturnsDeadline(t *testing.T) {
 		t.Fatal("Serve() hung after the shutdown timeout")
 	}
 	close(block)
+
+	match := regexp.MustCompile(`force_closed=(\d+)`).FindStringSubmatch(buffer.String())
+	if match == nil {
+		t.Fatalf("shutdown block missing force_closed: %q", buffer.String())
+	}
+	forceClosed, err := strconv.Atoi(match[1])
+	if err != nil {
+		t.Fatalf("force_closed value: %v", err)
+	}
+	if forceClosed == 0 {
+		t.Fatalf("force_closed = 0 after a shutdown timeout: %q", buffer.String())
+	}
 }
 
 func TestWriteSurvivesReadHeaderTimeout(t *testing.T) {
