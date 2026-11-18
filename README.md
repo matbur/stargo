@@ -270,6 +270,41 @@ Uploads up to 1 MiB stay in memory; larger ones spool to a temporary file that
 `Close` removes. Filenames are reduced to their base name, and both values and
 filenames are untrusted.
 
+## Cookies
+
+`cookies` validates a cookie before writing it and returns `ErrInvalid` where a
+browser would drop or rewrite it. It also enforces the `__Host-` and
+`__Secure-` prefix rules.
+
+```go
+cookies.Set(c.W, &http.Cookie{Name: "theme", Value: "dark", Path: "/", HttpOnly: true})
+theme := cookies.Read(c.R)["theme"]
+cookies.Delete(c.W, &http.Cookie{Name: "theme", Path: "/"})
+```
+
+`Read` parses every `Cookie` header line, so the last value for a name wins, and
+a malformed pair is skipped. `Delete` sends a clearing cookie with the same
+path, domain, and flags, which is what browsers match on.
+
+Signed cookies carry a JSON payload the client can read but not change:
+
+```go
+signer, err := cookies.NewSigner("__Host-session", []string{secret})
+if err != nil {
+	return err
+}
+if err := signer.Set(c.W, map[string]any{"user_id": userID}); err != nil {
+	return err
+}
+value, ok := signer.Get(c.R)
+```
+
+The payload is signed, not encrypted: store an id, never a secret. The first
+key signs and every key verifies, so a new key can go first and the old one stay
+for one max age. The signing key is derived from the configured key and the
+cookie name, so one secret can serve several cookies. Defaults are a 14-day max
+age, path `/`, `Secure`, `HttpOnly`, and `SameSite=Lax`.
+
 ## Console output
 
 When standard output is a terminal, starting the server prints a startup
@@ -418,6 +453,6 @@ and how to read the numbers.
 
 ## Not included
 
-No static asset pipeline, cookies or sessions, authentication, HTTP/2
+No static asset pipeline, sessions or authentication, HTTP/2
 tuning, SSE compression, cross-process relay, replay, or OpenTelemetry export.
 The relay and the tracer are process-local by design.
