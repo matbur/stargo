@@ -48,7 +48,7 @@ func View(identity common.Identity, rooms []room.Room, onlineCounts map[string]i
 			g.Attr("id", "lobby"),
 			g.Attr("class", "lobby-container"),
 			signalsAttribute(identity),
-			g.Attr("data-init", liveInit(liveHref)),
+			ds.Init(liveInit(liveHref)),
 			LiveView(rooms, onlineCounts),
 		),
 	)
@@ -62,11 +62,7 @@ func signalsAttribute(identity common.Identity) g.Node {
 	payload := identity.Signals()
 	payload["room_title"] = ""
 	payload["room_description"] = ""
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		panic(err) // a map of strings cannot fail to marshal
-	}
-	return g.Attr("data-signals__ifmissing", string(encoded))
+	return ds.Signals(payload, ds.WithIfMissing())
 }
 
 func roomList(rooms []room.Room, onlineCounts map[string]int) g.Node {
@@ -129,7 +125,7 @@ func createRoomDialog() g.Node {
 					g.Attr("class", "room-dialog-input"),
 					g.Attr("placeholder", "e.g. Design"),
 					g.Attr("autocomplete", "off"),
-					g.Attr("data-bind", "room_title"),
+					ds.Bind("room_title"),
 				),
 			),
 			h.Label(
@@ -139,7 +135,7 @@ func createRoomDialog() g.Node {
 					g.Attr("class", "room-dialog-textarea"),
 					g.Attr("placeholder", "What is this room for?"),
 					g.Attr("rows", "3"),
-					g.Attr("data-bind", "room_description"),
+					ds.Bind("room_description"),
 				),
 			),
 			h.Div(
@@ -153,7 +149,7 @@ func createRoomDialog() g.Node {
 				h.Button(
 					g.Attr("type", "submit"),
 					g.Attr("class", "room-dialog-create"),
-					g.Attr("data-attr", "{'disabled': !$room_title.trim()}"),
+					ds.Attr("disabled", "!$room_title.trim()"),
 					g.Text("Create"),
 				),
 			),

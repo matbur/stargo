@@ -157,17 +157,28 @@ h.Form(
 		ds.WithPrevent(),
 	),
 )
+
+// Initialize the page and seed signals that do not exist yet.
+h.Body(
+	ds.Init(ds.Get("/live")),
+	ds.Signals(map[string]any{"count": 0, "open": false}, ds.WithIfMissing()),
+)
+
+// Bind an input and one attribute reactively.
+h.Input(ds.Bind("message"))
+h.Button(ds.Attr("disabled", "!$message"), g.Text("Send"))
 ```
 
 `On` validates the event name and panics on an invalid one, so a typo fails at
-startup instead of silently doing nothing. `New(prefix)` returns an `Attributes`
-value for a Datastar bundle built with another prefix; the prefix must match the
-bundle, and the same value must be used for initial pages, SSE patches, and raw
-HTML.
+startup instead of silently doing nothing. The same applies to attribute keys
+and signal names. `New(prefix)` returns an `Attributes` value for a Datastar
+bundle built with another prefix; the prefix must match the bundle, and the
+same value must be used for initial pages, SSE patches, and raw HTML.
 
 Action paths are quoted as JavaScript string literals. Payload values and
 signal filter patterns are trusted JavaScript, not strings; never pass
-user-controlled text there.
+user-controlled text there. Signal payloads passed to `Signals` are the
+opposite: they are encoded as JSON data, never evaluated as JavaScript.
 
 ## Lifecycle
 

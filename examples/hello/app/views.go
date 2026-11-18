@@ -25,7 +25,7 @@ func Page(count int64, liveHref string) g.Node {
 			h.Script(h.Type("module"), h.Src(DatastarScript)),
 		),
 		h.Body(
-			g.Attr("data-init", ds.Get("/live")),
+			ds.Init(ds.Get("/live")),
 			h.H1(g.Text("Stargo counter")),
 			Counter(count),
 			h.Button(

@@ -2,7 +2,6 @@
 package room
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -55,7 +54,7 @@ func View(identity common.Identity, chatRoom Room, messages []Message, users []U
 			g.Attr("id", "room"),
 			g.Attr("class", "chat-container"),
 			signalsAttribute(identity),
-			g.Attr("data-init", liveInit(liveHref)),
+			ds.Init(liveInit(liveHref)),
 			LiveView(chatRoom, identity.UserID, messages, users),
 		),
 	)
@@ -68,11 +67,7 @@ func liveInit(liveHref string) string {
 func signalsAttribute(identity common.Identity) g.Node {
 	payload := identity.Signals()
 	payload["message"] = ""
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		panic(err) // a map of strings cannot fail to marshal
-	}
-	return g.Attr("data-signals__ifmissing", string(encoded))
+	return ds.Signals(payload, ds.WithIfMissing())
 }
 
 func messageView(message Message, currentUserID string) g.Node {
@@ -220,13 +215,13 @@ func inputFormView(roomID string) g.Node {
 			g.Attr("placeholder", "Type a message..."),
 			g.Attr("autocomplete", "off"),
 			g.Attr("autofocus", ""),
-			g.Attr("data-bind", "message"),
+			ds.Bind("message"),
 			ds.On("input", typing),
 		),
 		h.Button(
 			g.Attr("type", "button"),
 			g.Attr("class", "send-button"),
-			g.Attr("data-attr", "{'disabled': !$message}"),
+			ds.Attr("disabled", "!$message"),
 			ds.On("click", click),
 			h.Span(g.Attr("class", "send-icon"), g.Raw(sendIcon)),
 		),

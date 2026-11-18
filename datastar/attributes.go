@@ -9,7 +9,7 @@ import (
 	g "maragu.dev/gomponents"
 )
 
-// Attributes renders Datastar event attributes with one attribute prefix.
+// Attributes renders Datastar attributes with one attribute prefix.
 type Attributes struct {
 	prefix string
 }
@@ -29,7 +29,7 @@ func New(prefix string) Attributes {
 }
 
 // On renders a data-on attribute with the standard data- prefix.
-func On(event, expression string, opts ...OnOption) Attr {
+func On(event, expression string, opts ...OnOption) Attribute {
 	return Default().On(event, expression, opts...)
 }
 
@@ -38,7 +38,7 @@ func On(event, expression string, opts ...OnOption) Attr {
 // Event names are lowercase kebab-case. The expression is trusted JavaScript
 // and is HTML-escaped as an attribute value. Invalid or contradictory options
 // panic.
-func (a Attributes) On(event, expression string, opts ...OnOption) Attr {
+func (a Attributes) On(event, expression string, opts ...OnOption) Attribute {
 	if a.prefix == "" {
 		panic("datastar: use Default or New to create Attributes")
 	}
@@ -47,17 +47,17 @@ func (a Attributes) On(event, expression string, opts ...OnOption) Attr {
 	for _, opt := range opts {
 		opt(&cfg)
 	}
-	return Attr{name: a.prefix + "on:" + event + modifierSuffix(cfg), value: expression}
+	return Attribute{name: a.prefix + "on:" + event + modifierSuffix(cfg), value: expression}
 }
 
-// Attr is one rendered HTML attribute.
-type Attr struct {
+// Attribute is one rendered HTML attribute.
+type Attribute struct {
 	name  string
 	value string
 }
 
 // Render writes the attribute, including its leading space.
-func (a Attr) Render(w io.Writer) error {
+func (a Attribute) Render(w io.Writer) error {
 	var b strings.Builder
 	b.Grow(len(a.name) + len(a.value) + 4)
 	b.WriteByte(' ')
@@ -71,7 +71,7 @@ func (a Attr) Render(w io.Writer) error {
 
 // Type reports an attribute node to renderers that distinguish attributes
 // from elements, such as gomponents.
-func (Attr) Type() g.NodeType {
+func (Attribute) Type() g.NodeType {
 	return g.AttributeType
 }
 

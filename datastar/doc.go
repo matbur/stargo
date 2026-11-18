@@ -13,6 +13,13 @@
 //
 //	ds.Post("/rooms", ds.WithForm(), ds.WithSelector("#create-room"))
 //
+// State and binding attributes cover the rest of the Datastar surface:
+//
+//	ds.Init(ds.Get("/live"))
+//	ds.Signals(map[string]any{"count": 0}, ds.WithIfMissing())
+//	ds.Bind("message")
+//	ds.Attr("disabled", "!$message")
+//
 // New returns an instance for a Datastar bundle built with a custom attribute
 // prefix:
 //
@@ -22,7 +29,7 @@
 // The prefix must match the bundle loaded by the page, and the same prefix
 // must be used for pages, SSE patches, and raw HTML.
 //
-// Expressions, payload values, and signal filter patterns are trusted
-// JavaScript. Never pass user-controlled text as an expression or payload
-// value.
+// Signal payloads are JSON data. Expressions, action payload values, and
+// signal filter patterns are trusted JavaScript; never pass user-controlled
+// text as an expression or payload value.
 package datastar
