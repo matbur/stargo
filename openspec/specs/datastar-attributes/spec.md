@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines how Stargo renders Datastar event attributes from typed inputs, including modifier composition, escaping, name validation, and a configurable attribute prefix.
+Defines how Stargo renders Datastar attributes from typed inputs, including event handlers, initialization, signals, two-way and reactive bindings, modifier composition, escaping, name validation, and a configurable attribute prefix.
 
 ## Requirements
 
