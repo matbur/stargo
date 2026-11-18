@@ -64,6 +64,8 @@ though its rendered quoting is normalized.
   single-quoted form.
 - New tests cover attribute output, action output, escaping, validation panics, prefix
   handling, and option rendering.
-- No new module dependency; the package renders to an `io.Writer` and does not import
-  `maragu.dev/gomponents` outside tests.
+- New tests cover attribute output, action output, escaping, validation panics, prefix
+  handling, and option rendering.
+- The package imports `maragu.dev/gomponents` only for the attribute node-type marker and
+  renders and escapes values itself; no new module dependency is added.
 - No changes to `sse`, `signals`, or the response API.

@@ -55,7 +55,7 @@ func TestLiveViewRoomCards(t *testing.T) {
 		"UI talk",
 		"3 online",
 		"0 online",
-		`@delete(&#34;/rooms/design&#34;)`,
+		`@delete(&#39;/rooms/design&#39;)`,
 	}
 	for _, want := range checks {
 		if !strings.Contains(html, want) {
@@ -77,7 +77,7 @@ func TestViewCarriesSignalsAndLiveInit(t *testing.T) {
 		"HappyFox",
 		"room_title",
 		"sessionStorage",
-		`@get(&#34;/live&#34;, {retry: &#39;always&#39;})`,
+		`@get(&#39;/live&#39;, {retry: &#39;always&#39;})`,
 	}
 	for _, want := range checks {
 		if !strings.Contains(html, want) {

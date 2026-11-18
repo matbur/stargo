@@ -8,6 +8,7 @@ import (
 	g "maragu.dev/gomponents"
 	h "maragu.dev/gomponents/html"
 
+	ds "github.com/matbur/stargo/datastar"
 	"github.com/matbur/stargo/examples/chat-room/app/common"
 	"github.com/matbur/stargo/examples/chat-room/app/features/room"
 	"github.com/matbur/stargo/examples/chat-room/app/routes"
@@ -27,7 +28,7 @@ func LiveView(rooms []room.Room, onlineCounts map[string]int) g.Node {
 			h.Button(
 				g.Attr("type", "button"),
 				g.Attr("class", "lobby-new-btn"),
-				g.Attr("data-on:click", "document.getElementById('create-room-dialog').showModal()"),
+				ds.On("click", "document.getElementById('create-room-dialog').showModal()"),
 				g.Text("New room"),
 			),
 		),
@@ -54,7 +55,7 @@ func View(identity common.Identity, rooms []room.Room, onlineCounts map[string]i
 }
 
 func liveInit(liveHref string) string {
-	return common.SessionInitScript() + "\n@get(" + jsonString(liveHref) + ", {retry: 'always'})"
+	return common.SessionInitScript() + "\n" + ds.Get(liveHref, ds.WithRetry(ds.RetryAlways))
 }
 
 func signalsAttribute(identity common.Identity) g.Node {
@@ -85,7 +86,7 @@ func roomList(rooms []room.Room, onlineCounts map[string]int) g.Node {
 
 func roomCard(chatRoom room.Room, online int) g.Node {
 	confirmText := jsonString(fmt.Sprintf("Delete %s?", chatRoom.Title))
-	deleteCall := "@delete(" + jsonString(routes.DeleteRoom.Href(chatRoom.ID)) + ")"
+	deleteCall := ds.Delete(routes.DeleteRoom.Href(chatRoom.ID))
 	return h.Li(
 		h.Div(
 			g.Attr("class", "room-card"),
@@ -100,7 +101,7 @@ func roomCard(chatRoom room.Room, online int) g.Node {
 				g.Attr("type", "button"),
 				g.Attr("class", "room-delete-btn"),
 				g.Attr("title", "Delete room"),
-				g.Attr("data-on:click",
+				ds.On("click",
 					"evt.stopPropagation(); if (confirm("+confirmText+")) { "+deleteCall+"; }"),
 				g.Text("×"),
 			),
@@ -109,7 +110,7 @@ func roomCard(chatRoom room.Room, online int) g.Node {
 }
 
 func createRoomDialog() g.Node {
-	createCall := "@post(" + jsonString(routes.CreateRoom.Href()) + ")"
+	createCall := ds.Post(routes.CreateRoom.Href())
 	submit := "if ($room_title.trim()) { " + createCall + "; " +
 		"$room_title = ''; $room_description = ''; el.closest('dialog').close(); }"
 
@@ -118,7 +119,7 @@ func createRoomDialog() g.Node {
 		g.Attr("class", "room-dialog"),
 		h.Form(
 			g.Attr("class", "room-dialog-form"),
-			g.Attr("data-on:submit__prevent", submit),
+			ds.On("submit", submit, ds.WithPrevent()),
 			h.H2(g.Attr("class", "room-dialog-title"), g.Text("New room")),
 			h.Label(
 				g.Attr("class", "room-dialog-label"),
@@ -146,7 +147,7 @@ func createRoomDialog() g.Node {
 				h.Button(
 					g.Attr("type", "button"),
 					g.Attr("class", "room-dialog-cancel"),
-					g.Attr("data-on:click", "el.closest('dialog').close()"),
+					ds.On("click", "el.closest('dialog').close()"),
 					g.Text("Cancel"),
 				),
 				h.Button(

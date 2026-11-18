@@ -68,19 +68,21 @@ in one place.
 Alternatives: an options struct (rigid, ambiguous zero values) and a builder (mutable,
 more API surface).
 
-### Own renderer instead of `gomponents.Node`
+### Own renderer with an attribute marker
 
-The helper returns a small struct with `Render(io.Writer) error`. `gomponents` accepts it
-structurally, as does any renderer using the same contract, and the package avoids an
-import edge to the HTML library.
+The helper returns a small `Attr` struct with `Render(io.Writer) error` and
+`Type() g.NodeType`. `gomponents` places a node in the opening tag only when it reports
+`AttributeType`; structural `Render` alone is rendered as a child element. The package
+therefore imports `gomponents` for the node-type marker, while rendering and escaping stay
+its own.
 
 Consequence: attribute-value escaping must match HTML escaping. The implementation uses
 the same six replacements as `gomponents` (NUL, `"`, `'`, `&`, `<`, `>`). A test renders
-a corpus through both and compares bytes, so divergence fails CI. Tests may import
-`gomponents`; production code may not.
+a corpus through both and compares bytes, so divergence fails CI.
 
-Alternative: import `gomponents` and return `g.Node`. Rejected because it ties the helper
-to one library and adds a dependency edge the core deliberately avoids.
+Alternative: return a `gomponents` node built by `g.Attr`, delegating rendering and
+escaping. Rejected because it would make the helper depend on `gomponents` for behavior,
+not just for the attribute marker.
 
 ### Fixed modifier order
 

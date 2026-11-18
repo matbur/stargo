@@ -81,7 +81,7 @@ func TestShowEmptyLobby(t *testing.T) {
 		"No rooms yet",
 		`id="lobby-live"`,
 		"data-signals__ifmissing",
-		`@get(&#34;/live&#34;`,
+		`@get(&#39;/live&#39;`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("lobby missing %q", want)

@@ -132,6 +132,43 @@ ROOM.URL("42").Query(q).Fragment("top")  // /rooms/42?...?...#top
 values. Those are programmer errors; the request panic recovery turns them into
 `500` and a `panic` span event instead of a process exit.
 
+## Datastar attributes and actions
+
+`datastar` builds Datastar attributes and fetch actions from typed inputs.
+Import it as `ds`:
+
+```go
+import (
+	"time"
+
+	ds "github.com/matbur/stargo/datastar"
+)
+
+// A click handler with a POST action.
+h.Button(ds.On("click", ds.Post("/cart")), g.Text("Add to cart"))
+
+// Modifiers compose into one attribute name.
+h.Input(ds.On("input", ds.Post("/typing"), ds.WithDebounce(300*time.Millisecond)))
+
+// A form request with an explicit selector.
+h.Form(
+	ds.On("submit",
+		ds.Post("/rooms", ds.WithForm(), ds.WithSelector("#create-room")),
+		ds.WithPrevent(),
+	),
+)
+```
+
+`On` validates the event name and panics on an invalid one, so a typo fails at
+startup instead of silently doing nothing. `New(prefix)` returns an `Attributes`
+value for a Datastar bundle built with another prefix; the prefix must match the
+bundle, and the same value must be used for initial pages, SSE patches, and raw
+HTML.
+
+Action paths are quoted as JavaScript string literals. Payload values and
+signal filter patterns are trusted JavaScript, not strings; never pass
+user-controlled text there.
+
 ## Lifecycle
 
 `ListenAndServe` owns start and shutdown. On `SIGINT` or `SIGTERM` it:

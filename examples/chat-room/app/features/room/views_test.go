@@ -157,7 +157,7 @@ func TestViewCarriesSignalsAndLiveInit(t *testing.T) {
 		"data-signals__ifmissing",
 		"abc12345",
 		"sessionStorage",
-		`@get(&#34;/rooms/design/live&#34;`,
+		`@get(&#39;/rooms/design/live&#39;`,
 		`data-bind="message"`,
 		`data-on:input`,
 		`/rooms/design/typing`,

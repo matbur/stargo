@@ -10,6 +10,7 @@ import (
 	g "maragu.dev/gomponents"
 	h "maragu.dev/gomponents/html"
 
+	ds "github.com/matbur/stargo/datastar"
 	"github.com/matbur/stargo/examples/chat-room/app/common"
 	"github.com/matbur/stargo/examples/chat-room/app/routes"
 )
@@ -61,7 +62,7 @@ func View(identity common.Identity, chatRoom Room, messages []Message, users []U
 }
 
 func liveInit(liveHref string) string {
-	return common.SessionInitScript() + "\n@get(" + jsonString(liveHref) + ", {retry: 'always'})"
+	return common.SessionInitScript() + "\n" + ds.Get(liveHref, ds.WithRetry(ds.RetryAlways))
 }
 
 func signalsAttribute(identity common.Identity) g.Node {
@@ -112,8 +113,8 @@ func messagesView(currentUserID string, messages []Message) g.Node {
 			g.Text("No messages yet. Say hello!"),
 		))
 	} else {
-		children = append(children, g.Attr(
-			"data-on:load",
+		children = append(children, ds.On(
+			"load",
 			"setTimeout(() => el.scrollTop = el.scrollHeight, 10)",
 		))
 	}
@@ -202,8 +203,8 @@ func onlineUsersView(users []User) g.Node {
 }
 
 func inputFormView(roomID string) g.Node {
-	send := "@post(" + jsonString(routes.SendMessage.Href(roomID)) + ")"
-	typing := "@post(" + jsonString(routes.SetTyping.Href(roomID)) + ")"
+	send := ds.Post(routes.SendMessage.Href(roomID))
+	typing := ds.Post(routes.SetTyping.Href(roomID))
 	submit := "if ($message.trim()) { " + send + "; $message = ''; }"
 	click := "if ($message.trim()) { " + send +
 		"; $message = ''; document.getElementById('message-input').focus(); }"
@@ -211,7 +212,7 @@ func inputFormView(roomID string) g.Node {
 	return h.Form(
 		g.Attr("id", "input-form"),
 		g.Attr("class", "input-form"),
-		g.Attr("data-on:submit__prevent", submit),
+		ds.On("submit", submit, ds.WithPrevent()),
 		h.Input(
 			g.Attr("id", "message-input"),
 			g.Attr("type", "text"),
@@ -220,22 +221,14 @@ func inputFormView(roomID string) g.Node {
 			g.Attr("autocomplete", "off"),
 			g.Attr("autofocus", ""),
 			g.Attr("data-bind", "message"),
-			g.Attr("data-on:input", typing),
+			ds.On("input", typing),
 		),
 		h.Button(
 			g.Attr("type", "button"),
 			g.Attr("class", "send-button"),
 			g.Attr("data-attr", "{'disabled': !$message}"),
-			g.Attr("data-on:click", click),
+			ds.On("click", click),
 			h.Span(g.Attr("class", "send-icon"), g.Raw(sendIcon)),
 		),
 	)
-}
-
-func jsonString(value string) string {
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		panic(err) // strings always marshal
-	}
-	return string(encoded)
 }

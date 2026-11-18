@@ -5,6 +5,8 @@ import (
 
 	g "maragu.dev/gomponents"
 	h "maragu.dev/gomponents/html"
+
+	ds "github.com/matbur/stargo/datastar"
 )
 
 // DatastarScript is the Datastar browser bundle used by the example. Pin a
@@ -23,11 +25,11 @@ func Page(count int64, liveHref string) g.Node {
 			h.Script(h.Type("module"), h.Src(DatastarScript)),
 		),
 		h.Body(
-			g.Attr("data-init", "@get('/live')"),
+			g.Attr("data-init", ds.Get("/live")),
 			h.H1(g.Text("Stargo counter")),
 			Counter(count),
 			h.Button(
-				g.Attr("data-on:click", "@post('/command')"),
+				ds.On("click", ds.Post("/command")),
 				g.Text("Increment"),
 			),
 			h.P(
