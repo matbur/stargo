@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	g "maragu.dev/gomponents"
 	h "maragu.dev/gomponents/html"
@@ -87,6 +88,60 @@ func TestReactivePageAndPatchParity(t *testing.T) {
 		ds.Bind("message"),
 		ds.Signals(map[string]any{"ui.open": true}),
 		ds.Computed("total", "$a + $b"),
+		g.Text("go"),
+	)
+	page, err := render.HTML(context.Background(), node)
+	if err != nil {
+		t.Fatalf("page render: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	stream := sse.New(recorder)
+	if err := stream.PatchElements(node, sse.WithSelector("#go")); err != nil {
+		t.Fatalf("patch: %v", err)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if body := recorder.Body.String(); !strings.Contains(body, string(page)) {
+		t.Fatalf("patch body does not contain page HTML %q:\n%s", page, body)
+	}
+}
+
+func TestExtendedHelpersCompose(t *testing.T) {
+	node := h.Div(
+		ds.Attrs(map[string]string{"open": "sidebarOpen"}),
+		ds.Ignore(),
+		ds.OnSignalPatch("save()",
+			ds.WithSignalPatchDebounce(500*time.Millisecond),
+			ds.WithSignalPatchInclude("draft"),
+		),
+		g.Text("x"),
+	)
+	got := renderNode(t, node)
+	opening := got[:strings.Index(got, ">")+1]
+	for _, want := range []string{
+		`data-attr="{&#39;open&#39;:sidebarOpen}"`,
+		`data-ignore`,
+		`data-on-signal-patch__debounce.500ms="save()"`,
+		`data-on-signal-patch-filter="{&#39;include&#39;:&#39;draft&#39;}"`,
+	} {
+		if !strings.Contains(opening, want) {
+			t.Fatalf("opening tag %q missing %q", opening, want)
+		}
+	}
+	if !strings.HasSuffix(got, ">x</div>") {
+		t.Fatalf("composed = %q", got)
+	}
+}
+
+func TestExtendedPageAndPatchParity(t *testing.T) {
+	node := h.Div(
+		ds.Ignore(),
+		ds.OnSignalPatch("save()",
+			ds.WithSignalPatchThrottle(250*time.Millisecond),
+			ds.WithSignalPatchExclude("secret"),
+		),
 		g.Text("go"),
 	)
 	page, err := render.HTML(context.Background(), node)

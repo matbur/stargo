@@ -7,6 +7,7 @@ import (
 	"time"
 
 	g "maragu.dev/gomponents"
+	h "maragu.dev/gomponents/html"
 
 	ds "github.com/matbur/stargo/datastar"
 )
@@ -198,5 +199,26 @@ func TestPrefixes(t *testing.T) {
 		t.Run(prefix, func(t *testing.T) {
 			assertPanic(t, "datastar:", func() { ds.New(prefix) })
 		})
+	}
+}
+
+func TestGroupRendersAttributesInOrder(t *testing.T) {
+	group := ds.Group{ds.On("click", "a()"), ds.Show("$open")}
+	if got := renderNode(t, group); got != ` data-on:click="a()" data-show="$open"` {
+		t.Fatalf("Group() = %q", got)
+	}
+	if group.Type() != g.AttributeType {
+		t.Fatalf("Group.Type() = %v, want attribute", group.Type())
+	}
+}
+
+func TestGroupComposesWithGomponents(t *testing.T) {
+	node := h.Div(
+		ds.Group{ds.Show("$open"), ds.Style("width", "$w")},
+		g.Text("x"),
+	)
+	want := `<div data-show="$open" data-style:width="$w">x</div>`
+	if got := renderNode(t, node); got != want {
+		t.Fatalf("composed = %q, want %q", got, want)
 	}
 }

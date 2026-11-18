@@ -180,6 +180,42 @@ signal filter patterns are trusted JavaScript, not strings; never pass
 user-controlled text there. Signal payloads passed to `Signals` are the
 opposite: they are encoded as JSON data, never evaluated as JavaScript.
 
+Map forms render several reactive values in one object, and the event variants
+cover viewport, interval, and signal patch listeners:
+
+```go
+h.Div(
+	ds.Attrs(map[string]string{"open": "sidebarOpen", "busy": "$pending"}),
+	ds.Classes(map[string]string{"hidden": "!$open"}),
+	ds.Styles(map[string]string{"width": "$pct + '%'"}),
+	ds.Computeds(map[string]string{"total": "$a + $b"}),
+)
+
+h.Div(ds.OnIntersect("load()", ds.WithIntersectThreshold(0.25), ds.WithIntersectOnce()))
+h.Div(ds.OnInterval("tick()", ds.WithIntervalDuration(2*time.Second)))
+h.Div(ds.OnSignalPatch("save()",
+	ds.WithSignalPatchDebounce(500*time.Millisecond),
+	ds.WithSignalPatchInclude("draft"),
+))
+```
+
+The remaining attributes skip processing, track requests, reference elements,
+persist signals, preserve attributes during morphing, and render signals as
+JSON:
+
+```go
+h.Div(ds.Ignore())
+h.Div(ds.IgnoreMorph())
+h.Button(ds.Indicator("saving"), g.Text("Save"))
+h.Input(ds.Ref("searchInput"))
+h.Div(ds.Persist(ds.WithPersistKey("prefs"), ds.WithPersistSession()))
+h.Div(ds.PreserveAttr("data-testid", "id"))
+h.Pre(ds.JSONSignals(ds.WithJSONSignalsTerse()))
+```
+
+Map values and signal filter patterns are trusted JavaScript expressions, so
+never pass user-controlled text there.
+
 ## Lifecycle
 
 `ListenAndServe` owns start and shutdown. On `SIGINT` or `SIGTERM` it:

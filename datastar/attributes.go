@@ -54,6 +54,13 @@ func (a Attributes) On(event, expression string, opts ...OnOption) Attribute {
 type Attribute struct {
 	name  string
 	value string
+	bare  bool
+}
+
+// bareAttribute returns an attribute rendered as its name alone, such as
+// data-ignore.
+func bareAttribute(name string) Attribute {
+	return Attribute{name: name, bare: true}
 }
 
 // Render writes the attribute, including its leading space.
@@ -62,9 +69,11 @@ func (a Attribute) Render(w io.Writer) error {
 	b.Grow(len(a.name) + len(a.value) + 4)
 	b.WriteByte(' ')
 	b.WriteString(a.name)
-	b.WriteString(`="`)
-	b.WriteString(escapeAttribute(a.value))
-	b.WriteByte('"')
+	if !a.bare {
+		b.WriteString(`="`)
+		b.WriteString(escapeAttribute(a.value))
+		b.WriteByte('"')
+	}
 	_, err := io.WriteString(w, b.String())
 	return err
 }
@@ -72,6 +81,28 @@ func (a Attribute) Render(w io.Writer) error {
 // Type reports an attribute node to renderers that distinguish attributes
 // from elements, such as gomponents.
 func (Attribute) Type() g.NodeType {
+	return g.AttributeType
+}
+
+// Group is several attributes rendered in order.
+//
+// A helper returns a Group when one call produces more than one attribute,
+// such as a signal patch listener with its filter.
+type Group []Attribute
+
+// Render writes every attribute in order, each with its leading space.
+func (g Group) Render(w io.Writer) error {
+	for _, attribute := range g {
+		if err := attribute.Render(w); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Type reports an attribute node to renderers that distinguish attributes
+// from elements, such as gomponents.
+func (Group) Type() g.NodeType {
 	return g.AttributeType
 }
 

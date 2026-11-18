@@ -20,6 +20,27 @@
 //	ds.Bind("message")
 //	ds.Attr("disabled", "!$message")
 //
+// Map forms render several reactive values in one object, and the event
+// variants cover viewport, interval, and signal patch listeners:
+//
+//	ds.Attrs(map[string]string{"open": "sidebarOpen"})
+//	ds.Classes(map[string]string{"hidden": "!$open"})
+//	ds.Styles(map[string]string{"width": "$pct + '%'"})
+//	ds.Computeds(map[string]string{"total": "$a + $b"})
+//	ds.OnIntersect("load()", ds.WithIntersectOnce())
+//	ds.OnInterval("tick()", ds.WithIntervalDuration(2*time.Second))
+//	ds.OnSignalPatch("save()", ds.WithSignalPatchInclude("draft"))
+//
+// The remaining helpers cover processing and storage controls:
+//
+//	ds.Ignore()
+//	ds.IgnoreMorph()
+//	ds.Indicator("saving")
+//	ds.Ref("searchInput")
+//	ds.Persist(ds.WithPersistKey("prefs"))
+//	ds.PreserveAttr("data-testid", "id")
+//	ds.JSONSignals(ds.WithJSONSignalsTerse())
+//
 // New returns an instance for a Datastar bundle built with a custom attribute
 // prefix:
 //
@@ -29,7 +50,7 @@
 // The prefix must match the bundle loaded by the page, and the same prefix
 // must be used for pages, SSE patches, and raw HTML.
 //
-// Signal payloads are JSON data. Expressions, action payload values, and
-// signal filter patterns are trusted JavaScript; never pass user-controlled
-// text as an expression or payload value.
+// Signal payloads are JSON data. Expressions, map values, action payload
+// values, and signal filter patterns are trusted JavaScript; never pass
+// user-controlled text as an expression or payload value.
 package datastar

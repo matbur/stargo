@@ -182,17 +182,7 @@ func Computed(name, expression string) Attribute {
 // A dotted name expands into a nested object, so ui.total addresses
 // $ui.total.
 func (a Attributes) Computed(name, expression string) Attribute {
-	return a.named("computed", computedExpression(name, expression))
-}
-
-func computedExpression(name, expression string) string {
-	validateSignalName(name)
-	parts := strings.Split(name, ".")
-	inner := "() => (" + expression + ")"
-	for i := len(parts) - 1; i >= 0; i-- {
-		inner = "{" + quoteJSString(parts[i]) + ":" + inner + "}"
-	}
-	return inner
+	return a.Computeds(map[string]string{name: expression})
 }
 
 // named renders one attribute with this instance's prefix.
@@ -201,4 +191,12 @@ func (a Attributes) named(suffix, value string) Attribute {
 		panic("datastar: use Default or New to create Attributes")
 	}
 	return Attribute{name: a.prefix + suffix, value: value}
+}
+
+// bareNamed renders one valueless attribute with this instance's prefix.
+func (a Attributes) bareNamed(suffix string) Attribute {
+	if a.prefix == "" {
+		panic("datastar: use Default or New to create Attributes")
+	}
+	return bareAttribute(a.prefix + suffix)
 }
