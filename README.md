@@ -231,6 +231,45 @@ Any other error becomes `500` with a generic body, while the real message is
 kept in the request span. If the response already started, the connection is
 aborted instead of appending an error body.
 
+## Forms
+
+`forms.Read` parses an HTML form submission. `GET` and `HEAD` read the query
+string; every other method reads the body, which must be
+`application/x-www-form-urlencoded` or `multipart/form-data`.
+
+```go
+form, err := forms.Read(c.R)
+if err != nil {
+	switch {
+	case errors.Is(err, forms.ErrTooLarge):
+		return stargo.NewHTTPError(http.StatusRequestEntityTooLarge, "form too large")
+	case errors.Is(err, forms.ErrUnsupportedMediaType):
+		return stargo.NewHTTPError(http.StatusUnsupportedMediaType, "expected a form")
+	default:
+		return stargo.NewHTTPError(http.StatusBadRequest, "malformed form")
+	}
+}
+defer form.Close()
+
+name := form.Get("name")
+tags := form.Values("tag")
+
+if photo := form.File("photo"); photo != nil {
+	content, err := photo.ReadAll()
+	if err != nil {
+		return err
+	}
+	_ = content
+}
+```
+
+Parsing is bounded: 10 MiB per body, 1000 fields, 1 MiB per field, and 10 files
+by default, and `WithMaxBytes`, `WithMaxFields`, `WithMaxFieldBytes`,
+`WithMaxFiles`, `WithMaxFileBytes`, and `WithMemoryBytes` change the limits.
+Uploads up to 1 MiB stay in memory; larger ones spool to a temporary file that
+`Close` removes. Filenames are reduced to their base name, and both values and
+filenames are untrusted.
+
 ## Console output
 
 When standard output is a terminal, starting the server prints a startup
@@ -379,6 +418,6 @@ and how to read the numbers.
 
 ## Not included
 
-No static asset pipeline, forms, cookies or sessions, authentication, HTTP/2
+No static asset pipeline, cookies or sessions, authentication, HTTP/2
 tuning, SSE compression, cross-process relay, replay, or OpenTelemetry export.
 The relay and the tracer are process-local by design.
