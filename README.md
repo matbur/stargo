@@ -341,6 +341,66 @@ for one max age. The signing key is derived from the configured key and the
 cookie name, so one secret can serve several cookies. Defaults are a 14-day max
 age, path `/`, `Secure`, `HttpOnly`, and `SameSite=Lax`.
 
+## Testing
+
+`testing` serves an app on a loopback test server and gives tests a real HTTP
+client with a cookie jar, redirect handling, form and multipart encoding,
+response assertions, and Datastar SSE parsing. The package name is
+`stargotest`:
+
+```go
+import (
+	"net/http"
+	"testing"
+
+	"github.com/matbur/stargo"
+	stargotest "github.com/matbur/stargo/testing"
+)
+
+func TestLobby(t *testing.T) {
+	app := stargo.New(stargo.WithTracer(nil))
+	app.HandleFunc("/", func(c *stargo.Ctx) error {
+		return c.HTML("<h1>Rooms</h1>")
+	})
+
+	client := stargotest.NewClient(t, app)
+	client.Get("/").AssertStatus(http.StatusOK).AssertContains("Rooms")
+}
+```
+
+Cookies are kept across requests by default. `WithoutCookies`,
+`WithoutRedirects`, `WithMaxRedirects`, and `WithDefaultHeader` change the
+client behavior. Request helpers cover form and multipart bodies:
+
+```go
+client.PostForm("/rooms", url.Values{"title": {"Design"}})
+
+client.PostMultipart("/upload", stargotest.Multipart{
+	Fields: url.Values{"title": {"Report"}},
+	Files: []stargotest.File{
+		{Field: "file", Name: "report.txt", ContentType: "text/plain", Content: data},
+	},
+})
+```
+
+Assertions fail through `t.Fatalf` and include the request, the expected value,
+and the body. `AssertStatus`, `AssertHeader`, `AssertContains`,
+`AssertNotContains`, and `AssertCount` chain.
+
+`Open` reads an SSE response event by event, and `NextPatch` returns typed
+Datastar element and signal patches while skipping other events:
+
+```go
+stream := client.Open(client.Request(http.MethodGet, "/live"))
+defer stream.Close()
+
+patch, ok := stream.NextPatch()
+```
+
+`Render` renders a page value with the same renderer that responses and patches
+use. The package has no DOM or CSS selector engine; assertions match body
+fragments.
+
 ## Console output
 
 When standard output is a terminal, starting the server prints a startup
