@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -13,10 +12,12 @@ import (
 	chatdb "github.com/matbur/stargo/examples/chat-room/app/db"
 	"github.com/matbur/stargo/examples/chat-room/app/features/room"
 	"github.com/matbur/stargo/relay"
+	stargotest "github.com/matbur/stargo/testing"
 )
 
 type handlerApp struct {
 	app      *stargo.App
+	client   *stargotest.Client
 	database *chatdb.DB
 	relay    *relay.Relay[struct{}]
 }
@@ -30,22 +31,22 @@ func newHandlerApp(t *testing.T) handlerApp {
 	room.Page{Database: database, Relay: hub}.Register(app)
 	t.Cleanup(func() { _ = app.Close() })
 
-	return handlerApp{app: app, database: database, relay: hub}
+	return handlerApp{
+		app:      app,
+		client:   stargotest.NewClient(t, app, stargotest.WithoutRedirects()),
+		database: database,
+		relay:    hub,
+	}
 }
 
-func (a handlerApp) do(t *testing.T, method, target, body string) *httptest.ResponseRecorder {
+func (a handlerApp) do(t *testing.T, method, target, body string) *stargotest.Response {
 	t.Helper()
 
-	var request *http.Request
-	if body == "" {
-		request = httptest.NewRequest(method, target, nil)
-	} else {
-		request = httptest.NewRequest(method, target, strings.NewReader(body))
+	var opts []stargotest.RequestOption
+	if body != "" {
+		opts = append(opts, stargotest.WithBody("application/json", []byte(body)))
 	}
-
-	recorder := httptest.NewRecorder()
-	a.app.ServeHTTP(recorder, request)
-	return recorder
+	return a.client.Do(a.client.Request(method, target, opts...))
 }
 
 func (a handlerApp) seedRoom(t *testing.T) room.Room {
@@ -81,37 +82,25 @@ func TestShowRoom(t *testing.T) {
 		t.Fatalf("AddMessage() error = %v", err)
 	}
 
-	recorder := app.do(t, http.MethodGet, "/rooms/"+added.ID, "")
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", recorder.Code)
-	}
-
-	body := recorder.Body.String()
-	for _, want := range []string{
-		"Design Chat",
-		"UI talk",
-		"hello there",
-		"HappyFox",
-		"1 online",
-		`id="room-live"`,
-		`/rooms/design-chat/live`,
-	} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("room page missing %q", want)
-		}
-	}
+	app.do(t, http.MethodGet, "/rooms/"+added.ID, "").
+		AssertStatus(http.StatusOK).
+		AssertContains(
+			"Design Chat",
+			"UI talk",
+			"hello there",
+			"HappyFox",
+			"1 online",
+			`id="room-live"`,
+			`/rooms/design-chat/live`,
+		)
 }
 
 func TestShowUnknownRoomRedirects(t *testing.T) {
 	t.Parallel()
 
-	recorder := newHandlerApp(t).do(t, http.MethodGet, "/rooms/nope", "")
-	if recorder.Code != http.StatusFound {
-		t.Fatalf("status = %d, want 302", recorder.Code)
-	}
-	if got := recorder.Header().Get("Location"); got != "/" {
-		t.Fatalf("Location = %q, want /", got)
-	}
+	newHandlerApp(t).do(t, http.MethodGet, "/rooms/nope", "").
+		AssertStatus(http.StatusFound).
+		AssertHeader("Location", "/")
 }
 
 func TestShowIdentityOverride(t *testing.T) {
@@ -120,11 +109,9 @@ func TestShowIdentityOverride(t *testing.T) {
 	app := newHandlerApp(t)
 	added := app.seedRoom(t)
 
-	recorder := app.do(t, http.MethodGet,
-		"/rooms/"+added.ID+"?user_id=abc12345&username=HappyFox&color=%23000", "")
-	if body := recorder.Body.String(); !strings.Contains(body, "abc12345") {
-		t.Fatalf("query identity missing: %s", body)
-	}
+	app.do(t, http.MethodGet,
+		"/rooms/"+added.ID+"?user_id=abc12345&username=HappyFox&color=%23000", "").
+		AssertContains("abc12345")
 }
 
 func TestSendMessage(t *testing.T) {
@@ -143,11 +130,9 @@ func TestSendMessage(t *testing.T) {
 	}
 	defer events.Close()
 
-	recorder := app.do(t, http.MethodPost, "/rooms/"+added.ID+"/send",
-		`{"user_id":"u1","username":"HappyFox","color":"#000","message":"  hello  "}`)
-	if recorder.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204", recorder.Code)
-	}
+	app.do(t, http.MethodPost, "/rooms/"+added.ID+"/send",
+		`{"user_id":"u1","username":"HappyFox","color":"#000","message":"  hello  "}`).
+		AssertStatus(http.StatusNoContent)
 
 	messages, err := room.ListMessages(app.database, added.ID, 0)
 	if err != nil {
@@ -206,11 +191,9 @@ func TestSendEmptyMessage(t *testing.T) {
 	added := app.seedRoom(t)
 	app.seedUser(t, added.ID)
 
-	recorder := app.do(t, http.MethodPost, "/rooms/"+added.ID+"/send",
-		`{"user_id":"u1","username":"HappyFox","color":"#000","message":"   "}`)
-	if recorder.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204", recorder.Code)
-	}
+	app.do(t, http.MethodPost, "/rooms/"+added.ID+"/send",
+		`{"user_id":"u1","username":"HappyFox","color":"#000","message":"   "}`).
+		AssertStatus(http.StatusNoContent)
 
 	messages, err := room.ListMessages(app.database, added.ID, 0)
 	if err != nil {
@@ -226,18 +209,14 @@ func TestSendWithoutRoomOrPresenceNavigates(t *testing.T) {
 
 	app := newHandlerApp(t)
 
-	unknown := app.do(t, http.MethodPost, "/rooms/nope/send",
-		`{"user_id":"u1","username":"HappyFox","color":"#000","message":"hi"}`)
-	if !strings.Contains(unknown.Body.String(), `window.location = "/"`) {
-		t.Fatalf("unknown room response = %s", unknown.Body.String())
-	}
+	app.do(t, http.MethodPost, "/rooms/nope/send",
+		`{"user_id":"u1","username":"HappyFox","color":"#000","message":"hi"}`).
+		AssertContains(`window.location = "/"`)
 
 	added := app.seedRoom(t)
-	notPresent := app.do(t, http.MethodPost, "/rooms/"+added.ID+"/send",
-		`{"user_id":"u1","username":"HappyFox","color":"#000","message":"hi"}`)
-	if !strings.Contains(notPresent.Body.String(), `window.location = "/rooms/design-chat"`) {
-		t.Fatalf("absent user response = %s", notPresent.Body.String())
-	}
+	app.do(t, http.MethodPost, "/rooms/"+added.ID+"/send",
+		`{"user_id":"u1","username":"HappyFox","color":"#000","message":"hi"}`).
+		AssertContains(`window.location = "/rooms/design-chat"`)
 }
 
 func TestTypingPublishesOnlyChanges(t *testing.T) {
@@ -254,9 +233,8 @@ func TestTypingPublishesOnlyChanges(t *testing.T) {
 	defer events.Close()
 
 	payload := `{"user_id":"u1","username":"HappyFox","color":"#000","message":"hi"}`
-	if code := app.do(t, http.MethodPost, "/rooms/"+added.ID+"/typing", payload).Code; code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204", code)
-	}
+	app.do(t, http.MethodPost, "/rooms/"+added.ID+"/typing", payload).
+		AssertStatus(http.StatusNoContent)
 
 	users, err := room.ListUsers(app.database, added.ID)
 	if err != nil {
@@ -301,14 +279,12 @@ func TestTypingUnknownRoomOrUser(t *testing.T) {
 	t.Parallel()
 
 	app := newHandlerApp(t)
-	if code := app.do(t, http.MethodPost, "/rooms/nope/typing", `{"user_id":"u1"}`).Code; code != http.StatusNoContent {
-		t.Fatalf("unknown room status = %d, want 204", code)
-	}
+	app.do(t, http.MethodPost, "/rooms/nope/typing", `{"user_id":"u1"}`).
+		AssertStatus(http.StatusNoContent)
 
 	added := app.seedRoom(t)
-	if code := app.do(t, http.MethodPost, "/rooms/"+added.ID+"/typing", `{"user_id":"u1"}`).Code; code != http.StatusNoContent {
-		t.Fatalf("unknown user status = %d, want 204", code)
-	}
+	app.do(t, http.MethodPost, "/rooms/"+added.ID+"/typing", `{"user_id":"u1"}`).
+		AssertStatus(http.StatusNoContent)
 
 	users, err := room.ListUsers(app.database, added.ID)
 	if err != nil {

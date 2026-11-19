@@ -4,27 +4,16 @@ import (
 	"strings"
 	"testing"
 
-	g "maragu.dev/gomponents"
-
 	"github.com/matbur/stargo/examples/chat-room/app/common"
 	"github.com/matbur/stargo/examples/chat-room/app/features/lobby"
 	"github.com/matbur/stargo/examples/chat-room/app/features/room"
+	stargotest "github.com/matbur/stargo/testing"
 )
-
-func render(t *testing.T, node g.Node) string {
-	t.Helper()
-
-	var builder strings.Builder
-	if err := node.Render(&builder); err != nil {
-		t.Fatalf("Render() error = %v", err)
-	}
-	return builder.String()
-}
 
 func TestLiveViewEmptyState(t *testing.T) {
 	t.Parallel()
 
-	html := render(t, lobby.LiveView(nil, nil))
+	html := stargotest.Render(t, lobby.LiveView(nil, nil))
 	checks := []string{
 		`id="lobby-live"`,
 		"No rooms yet",
@@ -46,7 +35,7 @@ func TestLiveViewRoomCards(t *testing.T) {
 		{ID: "design", Title: "Design Chat", Description: "UI talk"},
 		{ID: "general", Title: "General", Description: "Welcome"},
 	}
-	html := render(t, lobby.LiveView(rooms, map[string]int{"design": 3}))
+	html := stargotest.Render(t, lobby.LiveView(rooms, map[string]int{"design": 3}))
 
 	checks := []string{
 		`href="/rooms/design"`,
@@ -68,7 +57,7 @@ func TestViewCarriesSignalsAndLiveInit(t *testing.T) {
 	t.Parallel()
 
 	identity := common.Identity{UserID: "abc12345", Username: "HappyFox", Color: "#000"}
-	html := render(t, lobby.View(identity, nil, nil, "/live"))
+	html := stargotest.Render(t, lobby.View(identity, nil, nil, "/live"))
 
 	checks := []string{
 		`id="lobby"`,

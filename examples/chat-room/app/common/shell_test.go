@@ -8,16 +8,13 @@ import (
 	h "maragu.dev/gomponents/html"
 
 	"github.com/matbur/stargo/examples/chat-room/app/common"
+	stargotest "github.com/matbur/stargo/testing"
 )
 
 func TestPageShell(t *testing.T) {
 	t.Parallel()
 
-	var builder strings.Builder
-	if err := common.Page(h.Main(g.Text("feature body"))).Render(&builder); err != nil {
-		t.Fatalf("Render() error = %v", err)
-	}
-	html := builder.String()
+	html := stargotest.Render(t, common.Page(h.Main(g.Text("feature body"))))
 
 	checks := []string{
 		"<!doctype html>",

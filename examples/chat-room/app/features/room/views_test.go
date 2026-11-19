@@ -5,26 +5,15 @@ import (
 	"testing"
 	"time"
 
-	g "maragu.dev/gomponents"
-
 	"github.com/matbur/stargo/examples/chat-room/app/common"
+	stargotest "github.com/matbur/stargo/testing"
 )
-
-func renderNode(t *testing.T, node g.Node) string {
-	t.Helper()
-
-	var builder strings.Builder
-	if err := node.Render(&builder); err != nil {
-		t.Fatalf("Render() error = %v", err)
-	}
-	return builder.String()
-}
 
 func TestLiveViewPatchRoot(t *testing.T) {
 	t.Parallel()
 
 	chatRoom := Room{ID: "design", Title: "Design Chat", Description: "UI talk"}
-	html := renderNode(t, LiveView(chatRoom, "u1", nil, nil))
+	html := stargotest.Render(t, LiveView(chatRoom, "u1", nil, nil))
 
 	for _, want := range []string{
 		`id="room-live"`,
@@ -50,7 +39,7 @@ func TestMessageOwnStylingAndOrder(t *testing.T) {
 		{ID: "m2", UserID: "u2", Username: "BraveOwl", Color: "#222", Text: "second", Timestamp: timestamp + 60_000},
 	}
 
-	html := renderNode(t, LiveView(Room{ID: "design", Title: "Design"}, "u1", messages, nil))
+	html := stargotest.Render(t, LiveView(Room{ID: "design", Title: "Design"}, "u1", messages, nil))
 
 	if !strings.Contains(html, `class="message own"`) {
 		t.Fatalf("own message not styled: %s", html)
@@ -105,14 +94,14 @@ func TestTypingSummaryVariants(t *testing.T) {
 func TestTypingIndicatorHidesOwnTyping(t *testing.T) {
 	t.Parallel()
 
-	html := renderNode(t, LiveView(Room{ID: "design"}, "u1", nil, []User{
+	html := stargotest.Render(t, LiveView(Room{ID: "design"}, "u1", nil, []User{
 		{ID: "u1", Username: "HappyFox", Typing: true},
 	}))
 	if !strings.Contains(html, `class="typing-indicator hidden"`) {
 		t.Fatalf("own typing should be hidden: %s", html)
 	}
 
-	html = renderNode(t, LiveView(Room{ID: "design"}, "u1", nil, []User{
+	html = stargotest.Render(t, LiveView(Room{ID: "design"}, "u1", nil, []User{
 		{ID: "u2", Username: "BraveOwl", Typing: true},
 	}))
 	if !strings.Contains(html, "BraveOwl is typing") {
@@ -132,14 +121,14 @@ func TestOnlineUsersAvatars(t *testing.T) {
 		})
 	}
 
-	html := renderNode(t, LiveView(Room{ID: "design"}, "u1", nil, users))
+	html := stargotest.Render(t, LiveView(Room{ID: "design"}, "u1", nil, users))
 	for _, want := range []string{"10 online", `class="avatar"`, `class="avatar more"`, "+2"} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("online users missing %q", want)
 		}
 	}
 
-	empty := renderNode(t, LiveView(Room{ID: "design"}, "u1", nil, nil))
+	empty := stargotest.Render(t, LiveView(Room{ID: "design"}, "u1", nil, nil))
 	if !strings.Contains(empty, `id="online" class="online-users"`) &&
 		!strings.Contains(empty, `class="online-users" id="online"`) {
 		t.Fatalf("empty online users missing: %s", empty)
@@ -150,7 +139,7 @@ func TestViewCarriesSignalsAndLiveInit(t *testing.T) {
 	t.Parallel()
 
 	identity := common.Identity{UserID: "abc12345", Username: "HappyFox", Color: "#000"}
-	html := renderNode(t, View(identity, Room{ID: "design"}, nil, nil, "/rooms/design/live"))
+	html := stargotest.Render(t, View(identity, Room{ID: "design"}, nil, nil, "/rooms/design/live"))
 
 	for _, want := range []string{
 		`id="room"`,

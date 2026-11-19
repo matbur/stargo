@@ -2,14 +2,13 @@ package main
 
 import (
 	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/matbur/stargo"
 	chatdb "github.com/matbur/stargo/examples/chat-room/app/db"
 	"github.com/matbur/stargo/examples/chat-room/app/features/room"
 	"github.com/matbur/stargo/relay"
+	stargotest "github.com/matbur/stargo/testing"
 )
 
 func TestStartupWiring(t *testing.T) {
@@ -25,21 +24,13 @@ func TestStartupWiring(t *testing.T) {
 		t.Fatalf("ApplySchema() error = %v", err)
 	}
 
-	app := newApp(database, relay.New[struct{}](), stargo.WithTracer(nil))
-	t.Cleanup(func() { _ = app.Close() })
+	application := newApp(database, relay.New[struct{}](), stargo.WithTracer(nil))
+	t.Cleanup(func() { _ = application.Close() })
 
-	lobby := httptest.NewRecorder()
-	app.ServeHTTP(lobby, httptest.NewRequest(http.MethodGet, "/", nil))
-	if lobby.Code != http.StatusOK {
-		t.Fatalf("GET / status = %d, want 200", lobby.Code)
-	}
-	if body := lobby.Body.String(); !strings.Contains(body, "No rooms yet") {
-		t.Fatalf("lobby missing the empty state: %s", body)
-	}
-
-	missing := httptest.NewRecorder()
-	app.ServeHTTP(missing, httptest.NewRequest(http.MethodGet, "/rooms/nope", nil))
-	if missing.Code != http.StatusFound {
-		t.Fatalf("GET /rooms/nope status = %d, want 302", missing.Code)
-	}
+	client := stargotest.NewClient(t, application, stargotest.WithoutRedirects())
+	client.Get("/").
+		AssertStatus(http.StatusOK).
+		AssertContains("No rooms yet")
+	client.Get("/rooms/nope").
+		AssertStatus(http.StatusFound)
 }

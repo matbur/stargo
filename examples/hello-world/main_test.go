@@ -2,55 +2,44 @@ package main
 
 import (
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/matbur/stargo"
+	stargotest "github.com/matbur/stargo/testing"
 )
 
-func serve(t *testing.T, method, target string) *httptest.ResponseRecorder {
+func serve(t *testing.T, method, target string) *stargotest.Response {
 	t.Helper()
+
 	app := newApp(stargo.WithTracer(nil))
 	t.Cleanup(func() { _ = app.Close() })
 
-	recorder := httptest.NewRecorder()
-	app.ServeHTTP(recorder, httptest.NewRequest(method, target, nil))
-	return recorder
+	client := stargotest.NewClient(t, app)
+	return client.Do(client.Request(method, target))
 }
 
 func TestPage(t *testing.T) {
 	t.Parallel()
 
-	recorder := serve(t, http.MethodGet, "/")
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", recorder.Code)
-	}
-	if got := recorder.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
-		t.Fatalf("Content-Type = %q", got)
-	}
-
-	body := recorder.Body.String()
-	checks := []string{
-		"<!doctype html>",
-		"<html lang=\"en\">",
-		"<title>Hello, Stario</title>",
-		"<h1>Hello, Stario</h1>",
-		"This page is one handler and one route.",
-	}
-	for _, want := range checks {
-		if !strings.Contains(body, want) {
-			t.Fatalf("body missing %q: %s", want, body)
-		}
-	}
+	serve(t, http.MethodGet, "/").
+		AssertStatus(http.StatusOK).
+		AssertHeader("Content-Type", "text/html; charset=utf-8").
+		AssertContains(
+			"<!doctype html>",
+			`<html lang="en">`,
+			"<title>Hello, Stario</title>",
+			"<h1>Hello, Stario</h1>",
+			"This page is one handler and one route.",
+		)
 }
 
 func TestPageHasNoClientBehavior(t *testing.T) {
 	t.Parallel()
 
-	body := serve(t, http.MethodGet, "/").Body.String()
+	body := strings.ToLower(serve(t, http.MethodGet, "/").Text())
 	for _, unwanted := range []string{"<script", "data-init", "data-signals", "datastar"} {
-		if strings.Contains(strings.ToLower(body), unwanted) {
+		if strings.Contains(body, unwanted) {
 			t.Fatalf("body contains %q: %s", unwanted, body)
 		}
 	}
@@ -59,7 +48,5 @@ func TestPageHasNoClientBehavior(t *testing.T) {
 func TestLiveEndpointIsMissing(t *testing.T) {
 	t.Parallel()
 
-	if code := serve(t, http.MethodGet, "/live").Code; code != http.StatusNotFound {
-		t.Fatalf("GET /live status = %d, want 404", code)
-	}
+	serve(t, http.MethodGet, "/live").AssertStatus(http.StatusNotFound)
 }

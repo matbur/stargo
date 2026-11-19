@@ -1,11 +1,9 @@
 package lobby_test
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -16,10 +14,12 @@ import (
 	"github.com/matbur/stargo/examples/chat-room/app/features/lobby"
 	"github.com/matbur/stargo/examples/chat-room/app/features/room"
 	"github.com/matbur/stargo/relay"
+	stargotest "github.com/matbur/stargo/testing"
 )
 
 type testApp struct {
 	app      *stargo.App
+	client   *stargotest.Client
 	database *chatdb.DB
 	relay    *relay.Relay[struct{}]
 }
@@ -42,26 +42,33 @@ func newTestApp(t *testing.T) testApp {
 	lobby.Page{Database: database, Relay: hub}.Register(app)
 	t.Cleanup(func() { _ = app.Close() })
 
-	return testApp{app: app, database: database, relay: hub}
+	return testApp{
+		app:      app,
+		client:   stargotest.NewClient(t, app),
+		database: database,
+		relay:    hub,
+	}
 }
 
-func (a testApp) do(t *testing.T, method, target, body string) *httptest.ResponseRecorder {
+func (a testApp) do(t *testing.T, method, target, body string) *stargotest.Response {
 	t.Helper()
 
-	var reader *strings.Reader
+	var opts []stargotest.RequestOption
 	if body != "" {
-		reader = strings.NewReader(body)
+		opts = append(opts, stargotest.WithBody("application/json", []byte(body)))
 	}
-	var request *http.Request
-	if reader != nil {
-		request = httptest.NewRequest(method, target, reader)
-	} else {
-		request = httptest.NewRequest(method, target, nil)
-	}
+	return a.client.Do(a.client.Request(method, target, opts...))
+}
 
-	recorder := httptest.NewRecorder()
-	a.app.ServeHTTP(recorder, request)
-	return recorder
+func openStream(t *testing.T, app testApp, target string) *stargotest.Stream {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	t.Cleanup(cancel)
+
+	stream := app.client.Open(app.client.Request(http.MethodGet, target).WithContext(ctx))
+	t.Cleanup(func() { _ = stream.Close() })
+	return stream
 }
 
 func signalURL(path, payload string) string {
@@ -71,22 +78,14 @@ func signalURL(path, payload string) string {
 func TestShowEmptyLobby(t *testing.T) {
 	t.Parallel()
 
-	recorder := newTestApp(t).do(t, http.MethodGet, "/", "")
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", recorder.Code)
-	}
-
-	body := recorder.Body.String()
-	for _, want := range []string{
-		"No rooms yet",
-		`id="lobby-live"`,
-		"data-signals__ifmissing",
-		`@get(&#39;/live&#39;`,
-	} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("lobby missing %q", want)
-		}
-	}
+	newTestApp(t).do(t, http.MethodGet, "/", "").
+		AssertStatus(http.StatusOK).
+		AssertContains(
+			"No rooms yet",
+			`id="lobby-live"`,
+			"data-signals__ifmissing",
+			`@get(&#39;/live&#39;`,
+		)
 }
 
 func TestShowListsRoomsWithPresence(t *testing.T) {
@@ -103,20 +102,16 @@ func TestShowListsRoomsWithPresence(t *testing.T) {
 		t.Fatalf("AddUser() error = %v", err)
 	}
 
-	body := app.do(t, http.MethodGet, "/", "").Body.String()
-	for _, want := range []string{"Design", "UI talk", "1 online", `href="/rooms/design"`} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("lobby missing %q", want)
-		}
-	}
+	app.do(t, http.MethodGet, "/", "").
+		AssertContains("Design", "UI talk", "1 online", `href="/rooms/design"`)
 }
 
 func TestShowMintsDistinctIdentities(t *testing.T) {
 	t.Parallel()
 
 	app := newTestApp(t)
-	first := app.do(t, http.MethodGet, "/", "").Body.String()
-	second := app.do(t, http.MethodGet, "/", "").Body.String()
+	first := app.client.Get("/").Text()
+	second := app.client.Get("/").Text()
 	if first == second {
 		t.Fatal("two lobby pages used the same identity")
 	}
@@ -132,17 +127,11 @@ func TestCreateRoomNavigates(t *testing.T) {
 	}
 	defer changed.Close()
 
-	recorder := app.do(t, http.MethodPost, "/rooms",
-		`{"room_title":"Design Chat","room_description":"UI talk"}`)
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", recorder.Code)
-	}
-	if got := recorder.Header().Get("Content-Type"); got != "text/event-stream" {
-		t.Fatalf("Content-Type = %q, want text/event-stream", got)
-	}
-	if body := recorder.Body.String(); !strings.Contains(body, `"/rooms/design-chat"`) {
-		t.Fatalf("response missing navigation: %s", body)
-	}
+	app.do(t, http.MethodPost, "/rooms",
+		`{"room_title":"Design Chat","room_description":"UI talk"}`).
+		AssertStatus(http.StatusOK).
+		AssertHeader("Content-Type", "text/event-stream").
+		AssertContains(`"/rooms/design-chat"`)
 
 	stored, err := room.GetRoom(app.database, "design-chat")
 	if err != nil {
@@ -199,10 +188,8 @@ func TestCreateRoomEmptyTitle(t *testing.T) {
 	t.Parallel()
 
 	app := newTestApp(t)
-	recorder := app.do(t, http.MethodPost, "/rooms", `{"room_title":"   "}`)
-	if recorder.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204", recorder.Code)
-	}
+	app.do(t, http.MethodPost, "/rooms", `{"room_title":"   "}`).
+		AssertStatus(http.StatusNoContent)
 
 	rooms, err := room.ListRooms(app.database)
 	if err != nil {
@@ -222,9 +209,8 @@ func TestDeleteRoom(t *testing.T) {
 		t.Fatalf("AddRoom() error = %v", err)
 	}
 
-	if code := app.do(t, http.MethodDelete, "/rooms/"+added.ID, "").Code; code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204", code)
-	}
+	app.do(t, http.MethodDelete, "/rooms/"+added.ID, "").
+		AssertStatus(http.StatusNoContent)
 
 	stored, err := room.GetRoom(app.database, added.ID)
 	if err != nil {
@@ -245,9 +231,8 @@ func TestDeleteMissingRoomPublishesNothing(t *testing.T) {
 	}
 	defer events.Close()
 
-	if code := app.do(t, http.MethodDelete, "/rooms/missing", "").Code; code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204", code)
-	}
+	app.do(t, http.MethodDelete, "/rooms/missing", "").
+		AssertStatus(http.StatusNoContent)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
@@ -260,31 +245,17 @@ func TestLiveInitialPatch(t *testing.T) {
 	t.Parallel()
 
 	app := newTestApp(t)
-	server := httptest.NewServer(app.app)
-	t.Cleanup(server.Close)
+	stream := openStream(t, app, signalURL("/live",
+		`{"user_id":"abc12345","username":"HappyFox","color":"#000"}`))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		signalURL(server.URL+"/live",
-			`{"user_id":"abc12345","username":"HappyFox","color":"#000"}`), nil)
-	if err != nil {
-		t.Fatalf("NewRequest() error = %v", err)
+	patch, ok := stream.NextPatch()
+	if !ok {
+		t.Fatal("NextPatch() returned no initial patch")
 	}
-	response, err := http.DefaultClient.Do(request)
-	if err != nil {
-		t.Fatalf("Do() error = %v", err)
-	}
-	defer response.Body.Close()
-
-	reader := bufio.NewReader(response.Body)
-	event := nextEvent(t, reader)
-	if !strings.Contains(event, "datastar-patch-elements") ||
-		!strings.Contains(event, "selector #lobby-live") {
-		t.Fatalf("first event = %s", event)
-	}
-	if !strings.Contains(event, "No rooms yet") {
-		t.Fatalf("first patch missing the empty state: %s", event)
+	if patch.Kind != stargotest.PatchElements ||
+		patch.Selector != "#lobby-live" ||
+		!strings.Contains(patch.Elements, "No rooms yet") {
+		t.Fatalf("first patch = %+v", patch)
 	}
 }
 
@@ -292,39 +263,25 @@ func TestLivePatchesOnRoomChanges(t *testing.T) {
 	t.Parallel()
 
 	app := newTestApp(t)
-	server := httptest.NewServer(app.app)
-	t.Cleanup(server.Close)
+	stream := openStream(t, app, signalURL("/live",
+		`{"user_id":"abc12345","username":"HappyFox","color":"#000"}`))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		signalURL(server.URL+"/live",
-			`{"user_id":"abc12345","username":"HappyFox","color":"#000"}`), nil)
-	if err != nil {
-		t.Fatalf("NewRequest() error = %v", err)
-	}
-	response, err := http.DefaultClient.Do(request)
-	if err != nil {
-		t.Fatalf("Do() error = %v", err)
-	}
-	defer response.Body.Close()
-
-	reader := bufio.NewReader(response.Body)
-	_ = nextEvent(t, reader) // initial patch
-
-	created, err := http.Post(server.URL+"/rooms", "application/json",
-		strings.NewReader(`{"room_title":"Design","room_description":"UI talk"}`))
-	if err != nil {
-		t.Fatalf("create room: %v", err)
-	}
-	defer created.Body.Close()
-	if created.StatusCode != http.StatusOK {
-		t.Fatalf("create room status = %d, want 200", created.StatusCode)
+	if _, ok := stream.NextPatch(); !ok {
+		t.Fatal("NextPatch() returned no initial patch")
 	}
 
-	event := nextEvent(t, reader)
-	if !strings.Contains(event, "Design") || !strings.Contains(event, "selector #lobby-live") {
-		t.Fatalf("patch after change = %s", event)
+	app.do(t, http.MethodPost, "/rooms",
+		`{"room_title":"Design","room_description":"UI talk"}`).
+		AssertStatus(http.StatusOK)
+
+	patch, ok := stream.NextPatch()
+	if !ok {
+		t.Fatal("NextPatch() returned no room patch")
+	}
+	if patch.Kind != stargotest.PatchElements ||
+		patch.Selector != "#lobby-live" ||
+		!strings.Contains(patch.Elements, "Design") {
+		t.Fatalf("patch after change = %+v", patch)
 	}
 }
 
@@ -332,39 +289,13 @@ func TestLiveWithoutIdentityNavigates(t *testing.T) {
 	t.Parallel()
 
 	app := newTestApp(t)
-	server := httptest.NewServer(app.app)
-	t.Cleanup(server.Close)
+	stream := openStream(t, app, "/live")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/live", nil)
-	if err != nil {
-		t.Fatalf("NewRequest() error = %v", err)
+	patch, ok := stream.NextPatch()
+	if !ok {
+		t.Fatal("NextPatch() returned no navigation patch")
 	}
-	response, err := http.DefaultClient.Do(request)
-	if err != nil {
-		t.Fatalf("Do() error = %v", err)
-	}
-	defer response.Body.Close()
-
-	event := nextEvent(t, bufio.NewReader(response.Body))
-	if !strings.Contains(event, `window.location = "/"`) {
-		t.Fatalf("missing navigation: %s", event)
-	}
-}
-
-func nextEvent(t *testing.T, reader *bufio.Reader) string {
-	t.Helper()
-
-	var event strings.Builder
-	for {
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			t.Fatalf("read stream: %v", err)
-		}
-		if line == "\n" {
-			return event.String()
-		}
-		event.WriteString(line)
+	if !strings.Contains(patch.Elements, `window.location = "/"`) {
+		t.Fatalf("missing navigation: %+v", patch)
 	}
 }

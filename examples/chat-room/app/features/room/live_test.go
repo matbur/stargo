@@ -1,77 +1,51 @@
 package room_test
 
 import (
-	"bufio"
 	"context"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/matbur/stargo/examples/chat-room/app/features/room"
+	stargotest "github.com/matbur/stargo/testing"
 )
 
 const identitySignals = `{"user_id":"u1","username":"HappyFox","color":"#000"}`
 
-func roomSignalURL(base, path, payload string) string {
-	return base + path + "?datastar=" + url.QueryEscape(payload)
+func signalURL(path, payload string) string {
+	return path + "?datastar=" + url.QueryEscape(payload)
 }
 
-// openStream starts a live request and returns its reader. A deadline on the
-// request context bounds every read.
-func openStream(t *testing.T, target string) (*bufio.Reader, context.CancelFunc) {
+// openStream starts a live request with a deadline that bounds every read.
+func openStream(t *testing.T, app handlerApp, target string) *stargotest.Stream {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
-	if err != nil {
-		cancel()
-		t.Fatalf("NewRequest() error = %v", err)
-	}
-	response, err := http.DefaultClient.Do(request)
-	if err != nil {
-		cancel()
-		t.Fatalf("Do() error = %v", err)
-	}
-	t.Cleanup(func() {
-		_ = response.Body.Close()
-		cancel()
-	})
+	t.Cleanup(cancel)
 
-	return bufio.NewReader(response.Body), cancel
+	stream := app.client.Open(app.client.Request(http.MethodGet, target).WithContext(ctx))
+	t.Cleanup(func() { _ = stream.Close() })
+	return stream
 }
 
-func nextEvent(t *testing.T, reader *bufio.Reader) string {
-	t.Helper()
-
-	var event strings.Builder
-	for {
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			t.Fatalf("read stream: %v", err)
-		}
-		if line == "\n" {
-			return event.String()
-		}
-		event.WriteString(line)
-	}
-}
-
-// nextEventContaining skips patches the test does not care about, such as the
+// nextPatchContaining skips patches the test does not care about, such as the
 // presence patch produced by the watcher's own join.
-func nextEventContaining(t *testing.T, reader *bufio.Reader, needle string) string {
+func nextPatchContaining(t *testing.T, stream *stargotest.Stream, needle string) stargotest.Patch {
 	t.Helper()
 
-	for i := 0; i < 10; i++ {
-		event := nextEvent(t, reader)
-		if strings.Contains(event, needle) {
-			return event
+	for range 10 {
+		patch, ok := stream.NextPatch()
+		if !ok {
+			t.Fatalf("stream ended before a patch contained %q", needle)
+		}
+		if strings.Contains(patch.Elements, needle) {
+			return patch
 		}
 	}
-	t.Fatalf("no event contained %q", needle)
-	return ""
+	t.Fatalf("no patch contained %q", needle)
+	return stargotest.Patch{}
 }
 
 func TestLiveJoinsAndPatches(t *testing.T) {
@@ -79,16 +53,17 @@ func TestLiveJoinsAndPatches(t *testing.T) {
 
 	app := newHandlerApp(t)
 	added := app.seedRoom(t)
-	server := httptest.NewServer(app.app)
-	t.Cleanup(server.Close)
+	stream := openStream(t, app, signalURL("/rooms/"+added.ID+"/live", identitySignals))
 
-	reader, _ := openStream(t, roomSignalURL(server.URL, "/rooms/"+added.ID+"/live", identitySignals))
-	event := nextEvent(t, reader)
-
-	for _, want := range []string{"datastar-patch-elements", "selector #room-live", "Design Chat", "HappyFox"} {
-		if !strings.Contains(event, want) {
-			t.Fatalf("first patch missing %q: %s", want, event)
-		}
+	patch, ok := stream.NextPatch()
+	if !ok {
+		t.Fatal("NextPatch() returned no initial patch")
+	}
+	if patch.Kind != stargotest.PatchElements ||
+		patch.Selector != "#room-live" ||
+		!strings.Contains(patch.Elements, "Design Chat") ||
+		!strings.Contains(patch.Elements, "HappyFox") {
+		t.Fatalf("first patch = %+v", patch)
 	}
 
 	exists, err := room.UserExists(app.database, "u1", added.ID)
@@ -105,11 +80,10 @@ func TestLiveReceivesMessageAndTyping(t *testing.T) {
 
 	app := newHandlerApp(t)
 	added := app.seedRoom(t)
-	server := httptest.NewServer(app.app)
-	t.Cleanup(server.Close)
-
-	reader, _ := openStream(t, roomSignalURL(server.URL, "/rooms/"+added.ID+"/live", identitySignals))
-	_ = nextEvent(t, reader) // initial patch
+	stream := openStream(t, app, signalURL("/rooms/"+added.ID+"/live", identitySignals))
+	if _, ok := stream.NextPatch(); !ok {
+		t.Fatal("NextPatch() returned no initial patch")
+	}
 
 	if err := room.AddMessage(app.database, room.Message{
 		ID: "m1", RoomID: added.ID, UserID: "u1", Username: "HappyFox",
@@ -119,9 +93,9 @@ func TestLiveReceivesMessageAndTyping(t *testing.T) {
 	}
 	app.relay.Publish(room.MessageSubject(added.ID), struct{}{})
 
-	messageEvent := nextEventContaining(t, reader, "hello watcher")
-	if !strings.Contains(messageEvent, "selector #room-live") {
-		t.Fatalf("message patch missing selector: %s", messageEvent)
+	messagePatch := nextPatchContaining(t, stream, "hello watcher")
+	if messagePatch.Selector != "#room-live" {
+		t.Fatalf("message patch selector = %q", messagePatch.Selector)
 	}
 
 	if err := room.AddUser(app.database, room.User{
@@ -131,9 +105,9 @@ func TestLiveReceivesMessageAndTyping(t *testing.T) {
 	}
 	app.relay.Publish(room.TypingSubject(added.ID), struct{}{})
 
-	typingEvent := nextEventContaining(t, reader, "is typing")
-	if !strings.Contains(typingEvent, "BraveOwl is typing") {
-		t.Fatalf("typing patch missing text: %s", typingEvent)
+	typingPatch := nextPatchContaining(t, stream, "is typing")
+	if !strings.Contains(typingPatch.Elements, "BraveOwl is typing") {
+		t.Fatalf("typing patch = %+v", typingPatch)
 	}
 }
 
@@ -142,25 +116,26 @@ func TestLivePresenceForOtherWatchers(t *testing.T) {
 
 	app := newHandlerApp(t)
 	added := app.seedRoom(t)
-	server := httptest.NewServer(app.app)
-	t.Cleanup(server.Close)
-
-	watcher, _ := openStream(t, roomSignalURL(server.URL, "/rooms/"+added.ID+"/live", identitySignals))
-	_ = nextEvent(t, watcher) // initial patch
-
-	second := `{"user_id":"u2","username":"BraveOwl","color":"#111"}`
-	_, stopSecond := openStream(t, roomSignalURL(server.URL, "/rooms/"+added.ID+"/live", second))
-
-	joinEvent := nextEventContaining(t, watcher, "2 online")
-	if !strings.Contains(joinEvent, "BraveOwl") {
-		t.Fatalf("join patch missing the new user: %s", joinEvent)
+	watcher := openStream(t, app, signalURL("/rooms/"+added.ID+"/live", identitySignals))
+	if _, ok := watcher.NextPatch(); !ok {
+		t.Fatal("NextPatch() returned no initial patch")
 	}
 
-	stopSecond()
+	second := openStream(t, app,
+		signalURL("/rooms/"+added.ID+"/live", `{"user_id":"u2","username":"BraveOwl","color":"#111"}`))
 
-	leftEvent := nextEventContaining(t, watcher, "1 online")
-	if strings.Contains(leftEvent, "BraveOwl") {
-		t.Fatalf("leave patch still lists the user: %s", leftEvent)
+	joinPatch := nextPatchContaining(t, watcher, "2 online")
+	if !strings.Contains(joinPatch.Elements, "BraveOwl") {
+		t.Fatalf("join patch = %+v", joinPatch)
+	}
+
+	if err := second.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	leftPatch := nextPatchContaining(t, watcher, "1 online")
+	if strings.Contains(leftPatch.Elements, "BraveOwl") {
+		t.Fatalf("leave patch still lists the user: %+v", leftPatch)
 	}
 }
 
@@ -169,20 +144,19 @@ func TestLiveNavigatesOnDeletion(t *testing.T) {
 
 	app := newHandlerApp(t)
 	added := app.seedRoom(t)
-	server := httptest.NewServer(app.app)
-	t.Cleanup(server.Close)
-
-	reader, _ := openStream(t, roomSignalURL(server.URL, "/rooms/"+added.ID+"/live", identitySignals))
-	_ = nextEvent(t, reader) // initial patch
+	stream := openStream(t, app, signalURL("/rooms/"+added.ID+"/live", identitySignals))
+	if _, ok := stream.NextPatch(); !ok {
+		t.Fatal("NextPatch() returned no initial patch")
+	}
 
 	if _, err := room.DeleteRoom(app.database, added.ID); err != nil {
 		t.Fatalf("DeleteRoom() error = %v", err)
 	}
 	app.relay.Publish(room.DeletedSubject(added.ID), struct{}{})
 
-	event := nextEventContaining(t, reader, "window.location")
-	if !strings.Contains(event, `window.location = "/"`) {
-		t.Fatalf("deletion did not navigate to the lobby: %s", event)
+	patch := nextPatchContaining(t, stream, "window.location")
+	if !strings.Contains(patch.Elements, `window.location = "/"`) {
+		t.Fatalf("deletion did not navigate to the lobby: %+v", patch)
 	}
 }
 
@@ -190,13 +164,14 @@ func TestLiveUnknownRoomNavigates(t *testing.T) {
 	t.Parallel()
 
 	app := newHandlerApp(t)
-	server := httptest.NewServer(app.app)
-	t.Cleanup(server.Close)
+	stream := openStream(t, app, signalURL("/rooms/nope/live", identitySignals))
 
-	reader, _ := openStream(t, roomSignalURL(server.URL, "/rooms/nope/live", identitySignals))
-	event := nextEvent(t, reader)
-	if !strings.Contains(event, `window.location = "/"`) {
-		t.Fatalf("unknown room did not navigate: %s", event)
+	patch, ok := stream.NextPatch()
+	if !ok {
+		t.Fatal("NextPatch() returned no navigation patch")
+	}
+	if !strings.Contains(patch.Elements, `window.location = "/"`) {
+		t.Fatalf("unknown room did not navigate: %+v", patch)
 	}
 }
 
@@ -205,13 +180,14 @@ func TestLiveMissingIdentityNavigates(t *testing.T) {
 
 	app := newHandlerApp(t)
 	added := app.seedRoom(t)
-	server := httptest.NewServer(app.app)
-	t.Cleanup(server.Close)
+	stream := openStream(t, app, "/rooms/"+added.ID+"/live")
 
-	reader, _ := openStream(t, server.URL+"/rooms/"+added.ID+"/live")
-	event := nextEvent(t, reader)
-	if !strings.Contains(event, `window.location = "/rooms/design-chat"`) {
-		t.Fatalf("missing identity did not navigate: %s", event)
+	patch, ok := stream.NextPatch()
+	if !ok {
+		t.Fatal("NextPatch() returned no navigation patch")
+	}
+	if !strings.Contains(patch.Elements, `window.location = "/rooms/design-chat"`) {
+		t.Fatalf("missing identity did not navigate: %+v", patch)
 	}
 
 	users, err := room.ListUsers(app.database, added.ID)

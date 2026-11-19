@@ -1,40 +1,30 @@
 package app_test
 
 import (
-	"bufio"
 	"context"
-	"io"
-	"net"
 	"net/http"
-	"net/http/httptest"
 	"regexp"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/matbur/stargo"
 	"github.com/matbur/stargo/examples/hello/app"
 	"github.com/matbur/stargo/route"
+	stargotest "github.com/matbur/stargo/testing"
 )
 
 func TestPageRendersAndLinksResolve(t *testing.T) {
 	t.Parallel()
 
 	application := app.New(stargo.WithTracer(nil))
-	recorder := httptest.NewRecorder()
-	application.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
+	t.Cleanup(func() { _ = application.Close() })
 
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d", recorder.Code)
-	}
-	body := recorder.Body.String()
-	if !strings.Contains(body, `id="counter"`) {
-		t.Fatalf("counter missing from page: %q", body)
-	}
-	if !strings.Contains(body, "data-init=") {
-		t.Fatalf("live stream is not connected: %q", body)
-	}
+	response := stargotest.NewClient(t, application).
+		Get("/").
+		AssertStatus(http.StatusOK).
+		AssertContains(`id="counter"`, "data-init=")
 
+	body := response.Text()
 	registered := []route.Route{app.Home, app.Live, app.Command}
 	resolves := func(href string) bool {
 		for _, handle := range registered {
@@ -60,78 +50,41 @@ func TestPageRendersAndLinksResolve(t *testing.T) {
 }
 
 func TestLiveStreamReceivesPublishedPatch(t *testing.T) {
+	t.Parallel()
+
 	application := app.New(stargo.WithTracer(nil))
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	baseURL := "http://" + listener.Addr().String()
+	t.Cleanup(func() { _ = application.Close() })
 
-	ctx, cancelServer := context.WithCancel(context.Background())
-	defer cancelServer()
-	serveErr := make(chan error, 1)
-	go func() { serveErr <- application.Serve(ctx, listener) }()
+	client := stargotest.NewClient(t, application)
 
-	requestCtx, cancelRequest := context.WithCancel(ctx)
-	request, err := http.NewRequestWithContext(requestCtx, http.MethodGet, baseURL+"/live", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	client := &http.Client{Timeout: 5 * time.Second}
-	response, err := client.Do(request)
-	if err != nil {
-		t.Fatalf("GET /live: %v", err)
-	}
-	defer response.Body.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	stream := client.Open(client.Request(http.MethodGet, app.Live.Href()).WithContext(ctx))
+	defer stream.Close()
 
-	scanner := bufio.NewScanner(response.Body)
-	readUntil(t, scanner, `data: elements <div id="counter">0</div>`, 3*time.Second)
-
-	commandResponse, err := client.Post(baseURL+"/command", "application/json", strings.NewReader(`{}`))
-	if err != nil {
-		t.Fatalf("POST /command: %v", err)
+	initial, ok := stream.NextPatch()
+	if !ok {
+		t.Fatal("NextPatch() returned no initial patch")
 	}
-	_, _ = io.Copy(io.Discard, commandResponse.Body)
-	_ = commandResponse.Body.Close()
-	if commandResponse.StatusCode != http.StatusNoContent {
-		t.Fatalf("command status = %d", commandResponse.StatusCode)
+	if initial.Kind != stargotest.PatchElements ||
+		initial.Selector != "#counter" ||
+		initial.Elements != `<div id="counter">0</div>` {
+		t.Fatalf("initial patch = %+v", initial)
 	}
 
-	readUntil(t, scanner, `data: elements <div id="counter">1</div>`, 3*time.Second)
+	client.Do(client.Request(
+		http.MethodPost,
+		app.Command.Href(),
+		stargotest.WithBody("application/json", []byte(`{}`)),
+	)).AssertStatus(http.StatusNoContent)
 
-	cancelRequest()
-	cancelServer()
-	select {
-	case err := <-serveErr:
-		if err != nil {
-			t.Fatalf("Serve() error = %v", err)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("Serve() did not return after cancelling")
+	updated, ok := stream.NextPatch()
+	if !ok {
+		t.Fatal("NextPatch() returned no counter patch")
 	}
-}
-
-// readUntil scans lines until one contains needle. The scanner is tied to the
-// live response body, so cancellation closes it.
-func readUntil(t *testing.T, scanner *bufio.Scanner, needle string, timeout time.Duration) {
-	t.Helper()
-	done := make(chan bool, 1)
-	go func() {
-		for scanner.Scan() {
-			if strings.Contains(scanner.Text(), needle) {
-				done <- true
-				return
-			}
-		}
-		done <- false
-	}()
-
-	select {
-	case found := <-done:
-		if !found {
-			t.Fatalf("stream ended before %q", needle)
-		}
-	case <-time.After(timeout):
-		t.Fatalf("timed out waiting for %q", needle)
+	if updated.Kind != stargotest.PatchElements ||
+		updated.Selector != "#counter" ||
+		updated.Elements != `<div id="counter">1</div>` {
+		t.Fatalf("counter patch = %+v", updated)
 	}
 }
