@@ -157,6 +157,36 @@ func TestSpanTreeAndAttributes(t *testing.T) {
 	}
 }
 
+func TestMultipleDestinations(t *testing.T) {
+	t.Parallel()
+
+	first := &syncBuffer{}
+	second := &syncBuffer{}
+	tracer := trace.New(
+		trace.Destination(first),
+		trace.Destination(second),
+		trace.BatchSize(1),
+		trace.FlushInterval(time.Millisecond),
+	)
+	t.Cleanup(func() { _ = tracer.Close() })
+
+	span := tracer.Start("request", "request")
+	span.End()
+	if err := tracer.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	firstRecords := readRecords(t, first.String())
+	secondRecords := readRecords(t, second.String())
+	if len(firstRecords) != 1 || len(secondRecords) != 1 {
+		t.Fatalf("records = %d and %d, want 1 each", len(firstRecords), len(secondRecords))
+	}
+	if firstRecords[0].TraceID != secondRecords[0].TraceID ||
+		firstRecords[0].SpanID != secondRecords[0].SpanID {
+		t.Fatalf("destinations saw different spans: %+v and %+v", firstRecords[0], secondRecords[0])
+	}
+}
+
 func TestStepOnEndedSpan(t *testing.T) {
 	t.Parallel()
 

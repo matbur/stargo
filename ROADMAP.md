@@ -1,7 +1,7 @@
 # Stargo roadmap
 
-Status: sections 1–4 are implemented. Section 5 lists optional work that stays
-out until a concrete example needs it.
+Status: sections 1–4 and 5.1 are implemented. The rest of section 5 lists
+optional work that stays out until a concrete example needs it.
 
 Reference: `stario/` (Python, local clone, not part of this repository).
 Compare against the current Go packages.
@@ -82,7 +82,9 @@ would cover, and the concrete trigger that would justify starting it.
 
 ### 5.1 OpenTelemetry export
 
-Current state: `trace` writes NDJSON to a file, stdout, or any `io.Writer`
+Status: implemented in `add-opentelemetry-export`.
+
+State before this change: `trace` writes NDJSON to a file, stdout, or any `io.Writer`
 through `trace.File`, `trace.Stdout`, and `trace.Destination`. Spans carry UUID
 trace, span, and parent IDs, a kind, attributes, and events. The writer is
 batched and bounded: 512 spans or 125 ms per flush, a bounded queue, dropped
@@ -331,4 +333,4 @@ its trigger appears, and open one change per entry rather than one large
 2. `add-cookie-helpers` — done
 3. `add-datastar-extra-attributes` — done
 4. `add-testing-client` — done
-5. Optional items as needed
+5. Optional items as needed (5.1 done)

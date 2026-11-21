@@ -27,6 +27,7 @@ type Option func(*App)
 func WithTracer(tracer *trace.Tracer) Option {
 	return func(a *App) {
 		a.tracer = tracer
+		a.tracerSet = true
 	}
 }
 
@@ -43,6 +44,7 @@ type App struct {
 	mux        *http.ServeMux
 	middleware []Middleware
 	tracer     *trace.Tracer
+	tracerSet  bool
 	name       string
 	rootCtx    context.Context
 	cancel     context.CancelFunc
@@ -54,16 +56,22 @@ type App struct {
 }
 
 // New returns an application with tracing configured from the environment.
+//
+// Options are applied before the environment tracer is built, so WithName can
+// supply the OpenTelemetry service name. WithTracer replaces the environment
+// tracer entirely.
 func New(opts ...Option) *App {
 	rootCtx, cancel := context.WithCancel(context.Background())
 	app := &App{
 		mux:     http.NewServeMux(),
-		tracer:  trace.FromEnv(),
 		rootCtx: rootCtx,
 		cancel:  cancel,
 	}
 	for _, opt := range opts {
 		opt(app)
+	}
+	if !app.tracerSet {
+		app.tracer = trace.FromEnv(trace.ServiceName(app.name))
 	}
 	return app
 }
@@ -119,7 +127,7 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if status == 0 {
 			status = http.StatusNotFound
 		}
-		span := a.tracer.Start("unmatched", "request")
+		span := a.requestSpan(r, "unmatched")
 		span.Attr("http.method", r.Method)
 		span.Attr("http.path", r.URL.Path)
 		span.Attr("http.status", status)
@@ -151,10 +159,12 @@ func (a *App) buildChain() http.Handler {
 
 func (a *App) wrap(pattern string, handler Handler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		span := a.requestSpan(r, pattern)
+		r = r.WithContext(trace.ContextWithSpan(r.Context(), span))
 		c := &Ctx{
 			W:    w,
 			R:    r,
-			Span: a.tracer.Start(pattern, "request"),
+			Span: span,
 			app:  a,
 		}
 		c.Span.Attr("http.route", pattern)
@@ -173,6 +183,19 @@ func (a *App) wrap(pattern string, handler Handler) http.HandlerFunc {
 		}
 		c.finish()
 	}
+}
+
+// requestSpan continues an incoming W3C trace when the request carries one and
+// otherwise starts a new trace.
+func (a *App) requestSpan(r *http.Request, name string) *trace.Span {
+	remote, ok := trace.ExtractContext(
+		r.Header.Get("traceparent"),
+		r.Header.Get("tracestate"),
+	)
+	if ok {
+		return a.tracer.StartRemote(name, "request", remote)
+	}
+	return a.tracer.Start(name, "request")
 }
 
 // statusRecorder observes the status written by the mux for unmatched

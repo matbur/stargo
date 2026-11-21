@@ -12,8 +12,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/matbur/stargo"
 	"github.com/matbur/stargo/examples/hello/app"
@@ -652,5 +654,209 @@ func TestUnmatchedRequestSpan(t *testing.T) {
 	}
 	if !statuses["404"] || !statuses["405"] {
 		t.Fatalf("statuses = %v, want 404 and 405", statuses)
+	}
+}
+
+func TestIncomingTraceContext(t *testing.T) {
+	t.Parallel()
+
+	app, buffer := newTracingApp(t)
+
+	var handlerSpan *trace.Span
+	app.HandleFunc("/traced", func(c *stargo.Ctx) error {
+		handlerSpan = trace.SpanFromContext(c.R.Context())
+		trace.Inject(c.R.Context(), c.W.Header())
+		return c.NoContent()
+	})
+
+	incoming := "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+	request := httptest.NewRequest(http.MethodGet, "/traced", nil)
+	request.Header.Set("traceparent", incoming)
+	request.Header.Set("tracestate", "vendor=value")
+	recorder := httptest.NewRecorder()
+	app.ServeHTTP(recorder, request)
+	if err := app.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	remote, ok := trace.ExtractContext(incoming, "")
+	if !ok {
+		t.Fatal("test traceparent is invalid")
+	}
+	if handlerSpan == nil {
+		t.Fatal("handler has no active span")
+	}
+	if handlerSpan.TraceID() != remote.TraceID {
+		t.Fatalf("handler trace id = %s, want %s", handlerSpan.TraceID(), remote.TraceID)
+	}
+
+	injected, ok := trace.ExtractContext(
+		recorder.Header().Get("traceparent"),
+		recorder.Header().Get("tracestate"),
+	)
+	if !ok {
+		t.Fatalf("injected traceparent is invalid: %q", recorder.Header().Get("traceparent"))
+	}
+	if injected.TraceID != remote.TraceID {
+		t.Fatalf("injected trace id = %s, want %s", injected.TraceID, remote.TraceID)
+	}
+	if recorder.Header().Get("tracestate") != "vendor=value" {
+		t.Fatalf("tracestate = %q", recorder.Header().Get("tracestate"))
+	}
+
+	spans := readSpans(t, buffer)
+	var requestSpan *spanRecord
+	for i := range spans {
+		if spans[i].Name == "/traced" {
+			requestSpan = &spans[i]
+		}
+	}
+	if requestSpan == nil {
+		t.Fatalf("request span missing from %+v", spans)
+	}
+	if requestSpan.TraceID != remote.TraceID.String() {
+		t.Fatalf("span trace id = %q, want %s", requestSpan.TraceID, remote.TraceID)
+	}
+	if requestSpan.ParentID != remote.SpanID.String() {
+		t.Fatalf("span parent = %q, want %s", requestSpan.ParentID, remote.SpanID)
+	}
+}
+
+func TestUnsampledIncomingTraceContext(t *testing.T) {
+	t.Parallel()
+
+	app, buffer := newTracingApp(t)
+
+	var handlerTrace uuid.UUID
+	app.HandleFunc("/quiet", func(c *stargo.Ctx) error {
+		if span := trace.SpanFromContext(c.R.Context()); span != nil {
+			handlerTrace = span.TraceID()
+		}
+		return c.NoContent()
+	})
+
+	incoming := "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00"
+	request := httptest.NewRequest(http.MethodGet, "/quiet", nil)
+	request.Header.Set("traceparent", incoming)
+	recorder := httptest.NewRecorder()
+	app.ServeHTTP(recorder, request)
+	if err := app.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	remote, ok := trace.ExtractContext(incoming, "")
+	if !ok {
+		t.Fatal("test traceparent is invalid")
+	}
+	if handlerTrace != remote.TraceID {
+		t.Fatalf("handler trace id = %s, want %s", handlerTrace, remote.TraceID)
+	}
+	if spans := readSpans(t, buffer); len(spans) != 0 {
+		t.Fatalf("unsampled trace exported spans: %+v", spans)
+	}
+}
+
+type otlpTestPayload struct {
+	ResourceSpans []struct {
+		Resource struct {
+			Attributes []struct {
+				Key   string `json:"key"`
+				Value struct {
+					StringValue string `json:"stringValue"`
+				} `json:"value"`
+			} `json:"attributes"`
+		} `json:"resource"`
+	} `json:"resourceSpans"`
+}
+
+func serviceNameFromPayload(t *testing.T, payload otlpTestPayload) string {
+	t.Helper()
+	if len(payload.ResourceSpans) == 0 {
+		t.Fatal("payload has no resource spans")
+	}
+	for _, attribute := range payload.ResourceSpans[0].Resource.Attributes {
+		if attribute.Key == "service.name" {
+			return attribute.Value.StringValue
+		}
+	}
+	t.Fatal("payload has no service.name")
+	return ""
+}
+
+func TestAppNameBecomesServiceName(t *testing.T) {
+	requests := make(chan otlpTestPayload, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload otlpTestPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode payload: %v", err)
+		}
+		requests <- payload
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+
+	t.Setenv("TRACE", "")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", server.URL)
+	t.Setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "")
+	t.Setenv("OTEL_EXPORTER_OTLP_HEADERS", "")
+	t.Setenv("OTEL_SERVICE_NAME", "")
+	t.Setenv("OTEL_TRACES_SAMPLER", "")
+	t.Setenv("OTEL_TRACES_SAMPLER_ARG", "")
+
+	app := stargo.New(stargo.WithName("chat-service"))
+	app.HandleFunc("/", func(c *stargo.Ctx) error { return c.NoContent() })
+	app.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+	if err := app.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	select {
+	case payload := <-requests:
+		if got := serviceNameFromPayload(t, payload); got != "chat-service" {
+			t.Fatalf("service.name = %q", got)
+		}
+	default:
+		t.Fatal("collector received no request")
+	}
+}
+
+func TestWithTracerWinsOverEnvironment(t *testing.T) {
+	var envCalls, explicitCalls atomic.Int64
+	envServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		envCalls.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(envServer.Close)
+	explicitServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		explicitCalls.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(explicitServer.Close)
+
+	t.Setenv("TRACE", "")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", envServer.URL)
+	t.Setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "")
+	t.Setenv("OTEL_EXPORTER_OTLP_HEADERS", "")
+	t.Setenv("OTEL_SERVICE_NAME", "")
+	t.Setenv("OTEL_TRACES_SAMPLER", "")
+	t.Setenv("OTEL_TRACES_SAMPLER_ARG", "")
+
+	tracer := trace.New(
+		trace.OTLP(explicitServer.URL),
+		trace.BatchSize(1),
+		trace.FlushInterval(time.Millisecond),
+	)
+	app := stargo.New(stargo.WithTracer(tracer))
+	app.HandleFunc("/", func(c *stargo.Ctx) error { return c.NoContent() })
+	app.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+	if err := app.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	if got := explicitCalls.Load(); got != 1 {
+		t.Fatalf("explicit collector calls = %d, want 1", got)
+	}
+	if got := envCalls.Load(); got != 0 {
+		t.Fatalf("environment collector calls = %d, want 0", got)
 	}
 }

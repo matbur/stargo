@@ -2,7 +2,6 @@ package trace
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -16,21 +15,23 @@ const maxEvents = 1000
 // A nil *Span is valid and every method on it is a no-op, so handlers need no
 // tracing conditionals.
 type Span struct {
-	mu       sync.Mutex
-	tracer   *Tracer
-	id       uuid.UUID
-	traceID  uuid.UUID
-	parentID uuid.UUID
-	name     string
-	kind     string
-	startNS  int64
-	endNS    int64
-	status   string
-	err      string
-	attrs    map[string]any
-	events   []event
-	dropped  uint64
-	ended    bool
+	mu         sync.Mutex
+	tracer     *Tracer
+	id         uuid.UUID
+	traceID    uuid.UUID
+	parentID   uuid.UUID
+	name       string
+	kind       string
+	traceState string
+	sampled    bool
+	startNS    int64
+	endNS      int64
+	status     string
+	err        string
+	attrs      map[string]any
+	events     []event
+	dropped    uint64
+	ended      bool
 }
 
 type event struct {
@@ -72,7 +73,7 @@ func (s *Span) TraceID() uuid.UUID {
 
 // Attr sets an attribute. Attributes set after End are ignored.
 func (s *Span) Attr(key string, value any) {
-	if s == nil {
+	if s == nil || !s.sampled {
 		return
 	}
 	s.mu.Lock()
@@ -89,7 +90,7 @@ func (s *Span) Attr(key string, value any) {
 // Event records a timestamped event with optional attributes. At most 1000
 // events are kept per span; the rest are counted in span.dropped_events.
 func (s *Span) Event(name string, attributes map[string]any) {
-	if s == nil {
+	if s == nil || !s.sampled {
 		return
 	}
 	s.mu.Lock()
@@ -111,7 +112,7 @@ func (s *Span) Event(name string, attributes map[string]any) {
 // SetKind changes the span kind while the span is open. The framework uses it
 // to mark long-lived SSE handlers as streams.
 func (s *Span) SetKind(kind string) {
-	if s == nil {
+	if s == nil || !s.sampled {
 		return
 	}
 	s.mu.Lock()
@@ -124,7 +125,7 @@ func (s *Span) SetKind(kind string) {
 
 // Fail marks the span as failed and records the error message.
 func (s *Span) Fail(err error) {
-	if s == nil || err == nil {
+	if s == nil || err == nil || !s.sampled {
 		return
 	}
 	s.mu.Lock()
@@ -152,6 +153,8 @@ func (s *Span) Step(name string) (*Span, error) {
 	traceID := s.traceID
 	parentID := s.id
 	kind := s.kind
+	sampled := s.sampled
+	traceState := s.traceState
 	s.mu.Unlock()
 	if ended {
 		return nil, fmt.Errorf("trace: cannot step from ended span %q", s.name)
@@ -159,7 +162,7 @@ func (s *Span) Step(name string) (*Span, error) {
 	if tracer == nil {
 		return nil, nil
 	}
-	return tracer.startChild(name, kind, traceID, parentID), nil
+	return tracer.startChild(name, kind, traceID, parentID, sampled, traceState), nil
 }
 
 // Do runs fn inside a child span and ends the child afterwards.
@@ -208,15 +211,12 @@ func (s *Span) End() {
 	tracer := s.tracer
 	s.mu.Unlock()
 
-	if tracer == nil || tracer.writer == nil {
+	if tracer == nil || len(tracer.sinks) == 0 || !s.sampled {
 		return
 	}
-	line, err := json.Marshal(rec)
-	if err != nil {
-		tracer.writer.dropped.Add(1)
-		return
+	for _, sink := range tracer.sinks {
+		sink.enqueue(rec)
 	}
-	tracer.writer.enqueue(line)
 }
 
 func (s *Span) recordLocked() record {
@@ -243,27 +243,24 @@ func (s *Span) recordLocked() record {
 
 func (t *Tracer) start(name, kind string) *Span {
 	id := uuid.NewV7()
-	return &Span{
-		tracer:  t,
-		id:      id,
-		traceID: id,
-		name:    name,
-		kind:    kind,
-		startNS: time.Now().UnixNano(),
-		status:  "ok",
-	}
+	return t.newSpan(id, id, uuid.Nil(), name, kind, t.sample(id, SpanContext{}, false), "")
 }
 
-func (t *Tracer) startChild(name, kind string, traceID, parentID uuid.UUID) *Span {
-	span := &Span{
-		tracer:   t,
-		id:       uuid.NewV7(),
-		traceID:  traceID,
-		parentID: parentID,
-		name:     name,
-		kind:     kind,
-		startNS:  time.Now().UnixNano(),
-		status:   "ok",
+func (t *Tracer) startChild(name, kind string, traceID, parentID uuid.UUID, sampled bool, traceState string) *Span {
+	return t.newSpan(uuid.NewV7(), traceID, parentID, name, kind, sampled, traceState)
+}
+
+func (t *Tracer) newSpan(spanID, traceID, parentID uuid.UUID, name, kind string, sampled bool, traceState string) *Span {
+	return &Span{
+		tracer:     t,
+		id:         spanID,
+		traceID:    traceID,
+		parentID:   parentID,
+		name:       name,
+		kind:       kind,
+		traceState: traceState,
+		startNS:    time.Now().UnixNano(),
+		status:     "ok",
+		sampled:    sampled,
 	}
-	return span
 }

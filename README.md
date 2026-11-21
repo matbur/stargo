@@ -437,20 +437,60 @@ and enabling it does not change the NDJSON export.
 
 ## Tracing
 
-Tracing is off by default: no file is created and span calls are no-ops.
+Tracing is off by default: no file is created and span calls are no-ops. Set
+`TRACE` for local NDJSON, an OTLP endpoint for a collector, or both at once.
 
 | Variable | Meaning |
 |---|---|
-| `TRACE` | Unset, empty, `0`, `off`, `false`: off. `-`: stdout. `1`, `true`, `on`: use `TRACE_FILE`. Any other value: that file path. |
+| `TRACE` | Empty: no local file. `0`, `off`, `false`: tracing off. `-`: stdout. `1`, `true`, `on`: use `TRACE_FILE`. Any other value: that file path. |
 | `TRACE_FILE` | File used when `TRACE=1`; defaults to `trace.ndjson`. |
 | `TRACE_MAX_MB` | Opt into rotation after this many mebibytes. |
 | `TRACE_KEEP` | Total files kept by rotation, including the current one. Default 5. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Collector base URL; `/v1/traces` is appended. Setting it enables tracing. |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | Exact traces URL, used unchanged. |
+| `OTEL_EXPORTER_OTLP_HEADERS` | Comma-separated `key=value` request headers, percent-decoded. |
+| `OTEL_SERVICE_NAME` | `service.name` resource attribute; `stargo.WithName` wins when set. |
+| `OTEL_TRACES_SAMPLER` | `always_on`, `always_off`, `traceidratio`, or a `parentbased_*` variant. Default `parentbased_always_on`. |
+| `OTEL_TRACES_SAMPLER_ARG` | Ratio for the `*traceidratio` samplers. |
 
 ```sh
 TRACE=trace.ndjson go run ./examples/hello
 TRACE=- go run ./examples/hello
 TRACE=1 TRACE_FILE=/var/log/stargo.ndjson TRACE_MAX_MB=64 TRACE_KEEP=3 go run ./examples/hello
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 go run ./examples/chat-room
+TRACE=trace.ndjson OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 go run ./examples/chat-room
 ```
+
+Programmatic tracing uses the same options:
+
+```go
+tracer := trace.New(
+	trace.OTLP("http://collector:4318"),
+	trace.OTLPHeaders(map[string]string{"Authorization": "Bearer ..."}),
+	trace.ServiceName("chat-room"),
+	trace.WithSampler(trace.TraceIDRatio(0.1)),
+)
+app := stargo.New(stargo.WithTracer(tracer))
+```
+
+The OTLP exporter sends JSON over HTTP with no extra module dependency. Spans
+are batched, retried on transient failures, and dropped spans are counted like
+the local writer.
+
+Request spans continue a valid W3C `traceparent` and keep `tracestate`.
+Handlers propagate the context to outgoing calls:
+
+```go
+request, err := http.NewRequestWithContext(c.R.Context(), http.MethodGet, url, nil)
+if err != nil {
+	return err
+}
+trace.Inject(c.R.Context(), request.Header)
+```
+
+An absent or invalid header starts a new trace. Sampling applies to export, not
+span creation, so ids stay available for propagation even when a span is not
+exported.
 
 Every finished span is one JSON line:
 
@@ -507,9 +547,10 @@ FROM (
 GROUP BY path;
 ```
 
-The writer is batched and bounded: 512 spans or 125 ms per flush, a bounded
-queue, and dropped spans counted (visible through `Tracer.DroppedSpans`). A full
-queue never blocks a request. `Close` drains the queue before closing the file.
+Each destination is batched and bounded: 512 spans or 125 ms per flush, a
+bounded queue, and dropped spans counted across all destinations (visible
+through `Tracer.DroppedSpans`). A full queue never blocks a request. `Close`
+drains every queue before closing the file or the HTTP client.
 
 ## Examples
 
