@@ -21,6 +21,7 @@ type serveConfig struct {
 	shutdownTimeout   time.Duration
 	readHeaderTimeout time.Duration
 	idleTimeout       time.Duration
+	http2             *http.HTTP2Config
 	configure         func(*http.Server)
 	console           *consoleTarget
 }
@@ -57,6 +58,26 @@ func ReadHeaderTimeout(timeout time.Duration) ServeOption {
 func Server(configure func(*http.Server)) ServeOption {
 	return func(c *serveConfig) {
 		c.configure = configure
+	}
+}
+
+// HTTP2Streaming returns a preset tuned for many concurrent long-lived
+// streams: more concurrent streams, larger receive buffers, health-check
+// pings, and a bounded write-byte timeout. It only affects HTTP/2 connections.
+//
+// The preset is applied before the Server callback, so an application can
+// override individual fields.
+func HTTP2Streaming() ServeOption {
+	return func(c *serveConfig) {
+		c.http2 = &http.HTTP2Config{
+			MaxConcurrentStreams:          250,
+			MaxReadFrameSize:              32 << 10,
+			MaxReceiveBufferPerConnection: 1 << 20,
+			MaxReceiveBufferPerStream:     256 << 10,
+			SendPingTimeout:               30 * time.Second,
+			PingTimeout:                   15 * time.Second,
+			WriteByteTimeout:              time.Minute,
+		}
 	}
 }
 
@@ -101,6 +122,9 @@ func (a *App) Serve(ctx context.Context, ln net.Listener, opts ...ServeOption) e
 		BaseContext: func(net.Listener) context.Context {
 			return a.rootCtx
 		},
+	}
+	if cfg.http2 != nil {
+		server.HTTP2 = cfg.http2
 	}
 	if cfg.configure != nil {
 		cfg.configure(server)

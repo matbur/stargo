@@ -3,6 +3,7 @@ package stargo_test
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -858,5 +859,43 @@ func TestWithTracerWinsOverEnvironment(t *testing.T) {
 	}
 	if got := envCalls.Load(); got != 0 {
 		t.Fatalf("environment collector calls = %d, want 0", got)
+	}
+}
+
+func TestApplicationStreamCompresses(t *testing.T) {
+	t.Parallel()
+
+	app := newApp(t)
+	app.HandleFunc("/live", func(c *stargo.Ctx) error {
+		stream, err := c.Stream()
+		if err != nil {
+			return err
+		}
+		return stream.PatchElements("<div>compressed</div>")
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/live", nil)
+	request.Header.Set("Accept-Encoding", "gzip")
+	recorder := httptest.NewRecorder()
+	app.ServeHTTP(recorder, request)
+
+	if got := recorder.Header().Get("Content-Encoding"); got != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want gzip", got)
+	}
+	if got := recorder.Header().Get("Vary"); got != "Accept-Encoding" {
+		t.Fatalf("Vary = %q", got)
+	}
+
+	reader, err := gzip.NewReader(recorder.Body)
+	if err != nil {
+		t.Fatalf("gzip.NewReader() error = %v", err)
+	}
+	defer reader.Close()
+	body, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	if !strings.Contains(string(body), "data: elements <div>compressed</div>") {
+		t.Fatalf("body = %q", body)
 	}
 }

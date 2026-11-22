@@ -118,7 +118,13 @@ func TestServeOptionsReachServer(t *testing.T) {
 	go func() {
 		errCh <- app.Serve(ctx, listener,
 			ReadHeaderTimeout(2*time.Second),
-			Server(func(server *http.Server) { configured <- server }),
+			HTTP2Streaming(),
+			Server(func(server *http.Server) {
+				if server.HTTP2 != nil {
+					server.HTTP2.MaxConcurrentStreams = 99
+				}
+				configured <- server
+			}),
 		)
 	}()
 
@@ -143,6 +149,26 @@ func TestServeOptionsReachServer(t *testing.T) {
 	}
 	if captured.BaseContext == nil {
 		t.Fatal("BaseContext is nil")
+	}
+	if captured.HTTP2 == nil {
+		t.Fatal("HTTP2 preset was not applied")
+	}
+	if captured.HTTP2.MaxConcurrentStreams != 99 {
+		t.Fatalf("MaxConcurrentStreams = %d, want 99", captured.HTTP2.MaxConcurrentStreams)
+	}
+	if captured.HTTP2.MaxReceiveBufferPerConnection != 1<<20 ||
+		captured.HTTP2.MaxReceiveBufferPerStream != 256<<10 {
+		t.Fatalf("receive buffers = %d/%d",
+			captured.HTTP2.MaxReceiveBufferPerConnection,
+			captured.HTTP2.MaxReceiveBufferPerStream)
+	}
+	if captured.HTTP2.SendPingTimeout != 30*time.Second ||
+		captured.HTTP2.PingTimeout != 15*time.Second ||
+		captured.HTTP2.WriteByteTimeout != time.Minute {
+		t.Fatalf("HTTP2 timeouts = %v/%v/%v",
+			captured.HTTP2.SendPingTimeout,
+			captured.HTTP2.PingTimeout,
+			captured.HTTP2.WriteByteTimeout)
 	}
 }
 

@@ -101,7 +101,19 @@ SSE rules:
 - The protocol default `retry: 1000` is omitted from events.
 - Selectors and event ids must not contain line breaks; event ids must not
   contain NUL. Violations return an error before anything is written.
-- Streams are never compressed.
+- Streams compress with gzip when the request sends `Accept-Encoding: gzip`.
+  Q-values are honored, gzip is skipped when the response already has a
+  `Content-Encoding`, when the application sets `Cache-Control: no-transform`,
+  and for `HEAD` requests. `Content-Type: text/event-stream` and
+  `Cache-Control: no-cache` stay in place, and `Vary: Accept-Encoding` is
+  added. Every event flushes the compressor and the connection.
+- Compression starts with the first event; there is no size threshold, because
+  a stream would have to delay its first event to measure one. To keep a
+  response identity-encoded, add `no-transform` or strip `Accept-Encoding`
+  before opening the stream.
+- A proxy that buffers responses defeats streaming even when compressed. The
+  stream sets `X-Accel-Buffering: no`; configure the proxy to pass
+  `text/event-stream` through without buffering.
 - A failed write marks the stream disconnected; the request span records
   `request.client_left` and is not marked failed.
 
@@ -233,11 +245,18 @@ timeout would kill SSE), `IdleTimeout` 120s, shutdown timeout 10s.
 app.ListenAndServe(":8080",
 	stargo.ShutdownTimeout(15*time.Second),
 	stargo.ReadHeaderTimeout(5*time.Second),
+	stargo.HTTP2Streaming(),
 	stargo.Server(func(server *http.Server) {
 		server.MaxHeaderBytes = 1 << 20
 	}),
 )
 ```
+
+`HTTP2Streaming` tunes HTTP/2 for many concurrent live streams: 250 concurrent
+streams per connection, larger receive buffers, health-check pings every 30s,
+and a one-minute write-byte timeout. It applies before the `Server` callback,
+so individual fields stay overridable. Plain HTTP/1.1 is unaffected; `net/http`
+negotiates HTTP/2 on TLS listeners.
 
 For tests, unix sockets, or a custom listener, use `Serve` with a root context;
 it installs no signal handling:
@@ -590,6 +609,6 @@ and how to read the numbers.
 
 ## Not included
 
-No static asset pipeline, sessions or authentication, HTTP/2
-tuning, SSE compression, cross-process relay, replay, or OpenTelemetry export.
-The relay and the tracer are process-local by design.
+No static asset pipeline, sessions or authentication, cross-process relay,
+or replay. The relay and the tracer are process-local by design. SSE
+compression covers gzip; zstd and brotli would add module dependencies.

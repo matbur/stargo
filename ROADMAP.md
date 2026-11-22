@@ -1,7 +1,7 @@
 # Stargo roadmap
 
-Status: sections 1–4 and 5.1 are implemented. The rest of section 5 lists
-optional work that stays out until a concrete example needs it.
+Status: sections 1–4, 5.1, and 5.2 (gzip) are implemented. The rest of section 5
+lists optional work that stays out until a concrete example needs it.
 
 Reference: `stario/` (Python, local clone, not part of this repository).
 Compare against the current Go packages.
@@ -126,6 +126,9 @@ Suggested change: `add-opentelemetry-export`.
 
 ### 5.2 SSE compression and HTTP/2 tuning
 
+Status: implemented in `add-sse-compression` for gzip and the HTTP/2 preset.
+zstd and brotli stay out to keep the framework at one direct dependency.
+
 Current state: `sse.Stream` writes each event to the `http.ResponseWriter` and
 flushes it. There is no compression layer, so every repeated HTML fragment goes
 over the wire uncompressed. The server runs on `net/http` defaults; `Serve`
@@ -162,8 +165,9 @@ negotiation logic for precompressed files.
 Trigger: production streaming traffic, a mobile-heavy audience, or a reverse
 proxy that buffers streams. Examples on localhost do not need it.
 
-Suggested change: `add-sse-compression`, then `tune-http2-streaming` if the
-HTTP/2 part grows beyond a preset helper.
+Suggested change: `add-sse-compression` (done for gzip), then
+`tune-http2-streaming` if the HTTP/2 part grows beyond a preset helper (the
+preset shipped with `add-sse-compression`).
 
 ### 5.3 Static asset pipeline
 

@@ -104,7 +104,7 @@ func (c *Ctx) Stream() (*sse.Stream, error) {
 	c.mu.Unlock()
 
 	c.Span.SetKind("stream")
-	stream := sse.New(c.W, sse.WithContext(c.R.Context()))
+	stream := sse.New(c.W, sse.WithContext(c.R.Context()), sse.WithRequest(c.R))
 	c.mu.Lock()
 	c.stream = stream
 	c.mu.Unlock()

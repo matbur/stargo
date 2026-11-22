@@ -1,8 +1,10 @@
 package sse
 
 import (
+	"compress/gzip"
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"sync"
 )
@@ -12,14 +14,21 @@ import (
 // Every event is encoded into one buffer, written once, and flushed before the
 // call returns. The whole write path is serialized by a mutex, so several
 // goroutines may write without interleaving event bytes.
+//
+// A stream created with WithRequest compresses events with gzip when the
+// request accepts it. The gzip writer is flushed after every event.
 type Stream struct {
-	mu      sync.Mutex
-	w       http.ResponseWriter
-	rc      *http.ResponseController
-	ctx     context.Context
-	started bool
-	closed  bool
-	err     error
+	mu       sync.Mutex
+	w        http.ResponseWriter
+	rc       *http.ResponseController
+	ctx      context.Context
+	request  *http.Request
+	compress bool
+	gz       *gzip.Writer
+	gzClosed bool
+	started  bool
+	closed   bool
+	err      error
 }
 
 // StreamOption configures a Stream.
@@ -43,6 +52,9 @@ func New(w http.ResponseWriter, opts ...StreamOption) *Stream {
 	}
 	for _, opt := range opts {
 		opt(s)
+	}
+	if s.request != nil && s.request.Method != http.MethodHead {
+		s.compress = acceptsGzip(s.request.Header.Get("Accept-Encoding"))
 	}
 	return s
 }
@@ -74,6 +86,12 @@ func (s *Stream) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.closed = true
+	if s.gz != nil && !s.gzClosed {
+		s.gzClosed = true
+		if err := s.gz.Close(); err != nil && s.err == nil {
+			s.err = err
+		}
+	}
 	if s.err != nil {
 		return s.err
 	}
@@ -105,9 +123,16 @@ func (s *Stream) prepareLocked() error {
 		return nil
 	}
 
-	s.w.Header().Set("Content-Type", contentTypeEventStream)
-	s.w.Header().Set("Cache-Control", "no-cache")
-	s.w.Header().Set("X-Accel-Buffering", "no")
+	header := s.w.Header()
+	if s.compress && header.Get("Content-Encoding") == "" &&
+		!hasDirective(header.Get("Cache-Control"), "no-transform") {
+		s.gz = gzip.NewWriter(s.w)
+		header.Set("Content-Encoding", "gzip")
+		addVary(header)
+	}
+	header.Set("Content-Type", contentTypeEventStream)
+	ensureNoCache(header)
+	header.Set("X-Accel-Buffering", "no")
 	s.w.WriteHeader(http.StatusOK)
 	s.started = true
 	return nil
@@ -119,17 +144,28 @@ func (s *Stream) writeLocked(event []byte) error {
 	if err := s.prepareLocked(); err != nil {
 		return err
 	}
-	if _, err := s.w.Write(event); err != nil {
-		s.closed = true
-		s.err = err
-		return err
+	writer := io.Writer(s.w)
+	if s.gz != nil {
+		writer = s.gz
+	}
+	if _, err := writer.Write(event); err != nil {
+		return s.failLocked(err)
+	}
+	if s.gz != nil {
+		if err := s.gz.Flush(); err != nil {
+			return s.failLocked(err)
+		}
 	}
 	if err := s.rc.Flush(); err != nil {
-		s.closed = true
-		s.err = err
-		return err
+		return s.failLocked(err)
 	}
 	return nil
+}
+
+func (s *Stream) failLocked(err error) error {
+	s.closed = true
+	s.err = err
+	return err
 }
 
 const contentTypeEventStream = "text/event-stream"
