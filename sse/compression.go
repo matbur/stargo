@@ -4,10 +4,10 @@ import (
 	"compress/gzip"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/andybalholm/brotli"
+	"github.com/matbur/stargo/internal/encoding"
 )
 
 // compressor is the stream encoding seam shared by gzip and brotli.
@@ -35,62 +35,7 @@ func WithRequest(r *http.Request) StreamOption {
 
 // selectEncoding returns the preferred accepted encoding, or "" for identity.
 func selectEncoding(header string) string {
-	qualities, wildcard, hasWildcard := parseAcceptEncoding(header)
-	best := ""
-	bestQuality := 0.0
-	for _, name := range supportedEncodings {
-		quality, ok := qualities[name]
-		if !ok && name == "gzip" {
-			quality, ok = qualities["x-gzip"]
-		}
-		if !ok && hasWildcard {
-			quality, ok = wildcard, true
-		}
-		if !ok || quality <= 0 || quality <= bestQuality {
-			continue
-		}
-		best = name
-		bestQuality = quality
-	}
-	return best
-}
-
-// parseAcceptEncoding returns explicit qualities and the wildcard quality.
-func parseAcceptEncoding(header string) (map[string]float64, float64, bool) {
-	qualities := make(map[string]float64)
-	wildcard := 0.0
-	hasWildcard := false
-	for _, entry := range strings.Split(header, ",") {
-		fields := strings.Split(entry, ";")
-		name := strings.ToLower(strings.TrimSpace(fields[0]))
-		if name == "" {
-			continue
-		}
-		quality := 1.0
-		valid := true
-		for _, param := range fields[1:] {
-			key, value, found := strings.Cut(param, "=")
-			if !found || !strings.EqualFold(strings.TrimSpace(key), "q") {
-				continue
-			}
-			parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
-			if err != nil || parsed < 0 || parsed > 1 {
-				valid = false
-				break
-			}
-			quality = parsed
-		}
-		if !valid {
-			continue
-		}
-		if name == "*" {
-			wildcard = quality
-			hasWildcard = true
-			continue
-		}
-		qualities[name] = quality
-	}
-	return qualities, wildcard, hasWildcard
+	return encoding.Select(header, supportedEncodings...)
 }
 
 func newCompressor(encoding string, w io.Writer) compressor {

@@ -1,6 +1,6 @@
 # Stargo roadmap
 
-Status: sections 1–4, 5.1, and 5.2 are implemented. The rest of section 5
+Status: sections 1–4, 5.1, 5.2, and 5.3 are implemented. The rest of section 5
 lists optional work that stays out until a concrete example needs it.
 
 Reference: `stario/` (Python, local clone, not part of this repository).
@@ -172,6 +172,9 @@ HTTP/2 part grows beyond a preset helper (the preset shipped with
 
 ### 5.3 Static asset pipeline
 
+Status: implemented in `add-static-assets`. Dev reload stays out; restart to
+rehash.
+
 Current state: handlers return HTML and SSE. There is no static file serving, no
 `embed.FS` helper, no hashing, no cache headers, and no precompression. The
 examples inline CSS inside gomponents views, which is fine for a demo and wrong
@@ -204,7 +207,7 @@ safety overlaps 5.6.
 Trigger: the first example that ships real CSS or JavaScript files, or any
 deployment that needs cache busting and immutable caching.
 
-Suggested change: `add-static-assets`.
+Suggested change: `add-static-assets` (done).
 
 ### 5.4 Authentication and sessions
 

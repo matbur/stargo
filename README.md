@@ -271,6 +271,48 @@ waits for handlers, but it does not cancel their contexts; a handler that
 ignores cancellation is cut off when the shutdown timeout expires, and the entry
 point returns `context.DeadlineExceeded`.
 
+## Static assets
+
+`assets` serves a fixed set of files from an embedded filesystem or a
+directory. It indexes and hashes everything at startup, so URLs are stable for
+the lifetime of the process:
+
+```go
+//go:embed public
+var public embed.FS
+
+files, err := assets.FS(public, assets.Prefix("/assets"))
+if err != nil {
+	return err
+}
+app.HandleHTTP("/assets/", files)
+```
+
+Use `assets.Dir("public")` for files on disk. The prefix must match the pattern
+you mount; `URL` and `StableURL` include it:
+
+```go
+h.Link(h.Rel("stylesheet"), h.Href(files.URL("app.css")))       // /assets/app.<hash>.css
+h.Img(h.Src(files.StableURL("logo.png")), h.Alt("Logo"))        // /assets/logo.png
+```
+
+Hashed paths are sent with `Cache-Control: public, max-age=31536000, immutable`.
+Stable paths use `no-cache` and revalidate through a content ETag. Both support
+`If-None-Match`, ranges, and `HEAD`. `URL` panics for an unknown name, because
+asset names are constants in the application code.
+
+Only an explicit allowlist of extensions is served: CSS, JavaScript, JSON,
+images, fonts, WASM, text, CSV, XML, and source maps. Anything else, hidden
+files, traversal paths, and symlinks inside a directory return 404. Methods
+other than `GET` and `HEAD` return 405.
+
+Precompressed siblings are served when they exist: `app.css.br`, `app.css.zst`,
+and `app.css.gz`. The best accepted encoding wins with `br`, `zstd`, `gzip`
+preference, `Vary: Accept-Encoding` is set, and the identity file is the
+fallback. Generate siblings in the build; the handler never compresses at
+request time. A stale sibling is served under the hashed identity URL, so
+regenerate both together.
+
 ## Responses and errors
 
 `Ctx` provides `HTML`, `JSON`, `Text`, `NoContent`, `Redirect`, and `Stream`.
@@ -610,6 +652,7 @@ and how to read the numbers.
 
 ## Not included
 
-No static asset pipeline, sessions or authentication, cross-process relay,
-or replay. The relay and the tracer are process-local by design. SSE
-compression covers brotli and gzip; zstd stays out.
+No sessions or authentication, cross-process relay, or replay. The relay and
+the tracer are process-local by design. SSE compression covers brotli and gzip;
+zstd stays out. Static assets are served from a fixed index; there is no
+bundler, minifier, or dev watcher.

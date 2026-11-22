@@ -15,10 +15,12 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/fstest"
 	"time"
 	"uuid"
 
 	"github.com/matbur/stargo"
+	"github.com/matbur/stargo/assets"
 	"github.com/matbur/stargo/examples/hello/app"
 	"github.com/matbur/stargo/route"
 	"github.com/matbur/stargo/trace"
@@ -897,5 +899,46 @@ func TestApplicationStreamCompresses(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "data: elements <div>compressed</div>") {
 		t.Fatalf("body = %q", body)
+	}
+}
+
+func TestHandleHTTPMountsStandardHandler(t *testing.T) {
+	t.Parallel()
+
+	app, buffer := newTracingApp(t)
+	files, err := assets.FS(fstest.MapFS{
+		"app.css": {Data: []byte("body{color:red}")},
+	}, assets.Prefix("/assets"))
+	if err != nil {
+		t.Fatalf("assets.FS() error = %v", err)
+	}
+	app.HandleHTTP("/assets/", files)
+
+	served := serve(app, http.MethodGet, "/assets/app.css")
+	if served.Code != http.StatusOK || served.Body.String() != "body{color:red}" {
+		t.Fatalf("asset = %d %q", served.Code, served.Body.String())
+	}
+	missing := serve(app, http.MethodGet, "/assets/missing.css")
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("missing status = %d", missing.Code)
+	}
+	if err := app.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	records := readSpans(t, buffer)
+	statuses := map[string]int{}
+	for _, record := range records {
+		if record.Name != "/assets/" {
+			t.Fatalf("span name = %q, want /assets/", record.Name)
+		}
+		status, _ := record.Attributes["http.status"].(float64)
+		statuses[record.Attributes["http.path"].(string)] = int(status)
+	}
+	if statuses["/assets/app.css"] != http.StatusOK {
+		t.Fatalf("asset span status = %d", statuses["/assets/app.css"])
+	}
+	if statuses["/assets/missing.css"] != http.StatusNotFound {
+		t.Fatalf("missing span status = %d", statuses["/assets/missing.css"])
 	}
 }

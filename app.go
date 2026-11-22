@@ -88,6 +88,16 @@ func (a *App) HandleFunc(pattern string, handler Handler) {
 	a.mux.Handle(pattern, a.wrap(pattern, handler))
 }
 
+// HandleHTTP registers a standard http.Handler for a raw net/http pattern.
+// The handler owns the response, while the framework records the request span,
+// route attributes, and status and adopts incoming trace context.
+func (a *App) HandleHTTP(pattern string, handler http.Handler) {
+	if handler == nil {
+		panic("stargo: handler is nil")
+	}
+	a.mux.Handle(pattern, a.wrapHTTP(pattern, handler))
+}
+
 // Use appends middleware. The first registered middleware is the outermost.
 // Register middleware before serving requests.
 func (a *App) Use(middleware Middleware) {
@@ -196,6 +206,25 @@ func (a *App) requestSpan(r *http.Request, name string) *trace.Span {
 		return a.tracer.StartRemote(name, "request", remote)
 	}
 	return a.tracer.Start(name, "request")
+}
+
+func (a *App) wrapHTTP(pattern string, handler http.Handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		span := a.requestSpan(r, pattern)
+		r = r.WithContext(trace.ContextWithSpan(r.Context(), span))
+		span.Attr("http.route", pattern)
+		span.Attr("http.method", r.Method)
+		span.Attr("http.path", r.URL.Path)
+		defer span.End()
+
+		recorder := &statusRecorder{ResponseWriter: w}
+		handler.ServeHTTP(recorder, r)
+		status := recorder.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		span.Attr("http.status", status)
+	}
 }
 
 // statusRecorder observes the status written by the mux for unmatched
