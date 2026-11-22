@@ -174,3 +174,18 @@ The framework SHALL provide a server option that configures HTTP/2 for many conc
 #### Scenario: HTTP/1.1 unaffected
 - **WHEN** a client connects without HTTP/2 negotiation
 - **THEN** the server still serves normal HTTP/1.1 responses
+
+### Requirement: Standard handler mounting
+The application SHALL register a standard `http.Handler` on a raw pattern while keeping the request span, route attributes, incoming trace context, and status recording that `Ctx` handlers receive.
+
+#### Scenario: Mounted handler
+- **WHEN** an application mounts an `http.Handler` on `/assets/`
+- **THEN** the handler writes the response and the request span carries the pattern, method, path, and status
+
+#### Scenario: Existing trace
+- **WHEN** a request with a valid `traceparent` reaches a mounted handler
+- **THEN** the request span continues that trace
+
+#### Scenario: Status recorded
+- **WHEN** a mounted handler answers 404
+- **THEN** the span status attribute is 404
