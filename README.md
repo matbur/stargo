@@ -9,8 +9,8 @@ A small Go web framework modeled on [Stario](https://github.com/stariodev/stario
 - Request tracing as newline-delimited JSON, off by default.
 - `net/http` underneath, with a framework-owned server lifecycle.
 
-Go 1.27 or newer. The module has one direct dependency, and only the example
-imports it.
+Go 1.27 or newer. The module has two direct dependencies: gomponents for
+HTML and brotli for stream compression.
 
 ```sh
 go get github.com/matbur/stargo
@@ -101,9 +101,10 @@ SSE rules:
 - The protocol default `retry: 1000` is omitted from events.
 - Selectors and event ids must not contain line breaks; event ids must not
   contain NUL. Violations return an error before anything is written.
-- Streams compress with gzip when the request sends `Accept-Encoding: gzip`.
-  Q-values are honored, gzip is skipped when the response already has a
-  `Content-Encoding`, when the application sets `Cache-Control: no-transform`,
+- Streams compress with brotli or gzip when the request advertises either.
+  Q-values are honored, an explicit `q=0` refuses that encoding, and equal
+  qualities prefer brotli. Compression is skipped when the response already has
+  a `Content-Encoding`, when the application sets `Cache-Control: no-transform`,
   and for `HEAD` requests. `Content-Type: text/event-stream` and
   `Cache-Control: no-cache` stay in place, and `Vary: Accept-Encoding` is
   added. Every event flushes the compressor and the connection.
@@ -611,4 +612,4 @@ and how to read the numbers.
 
 No static asset pipeline, sessions or authentication, cross-process relay,
 or replay. The relay and the tracer are process-local by design. SSE
-compression covers gzip; zstd and brotli would add module dependencies.
+compression covers brotli and gzip; zstd stays out.

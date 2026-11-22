@@ -1,7 +1,6 @@
 package sse
 
 import (
-	"compress/gzip"
 	"context"
 	"errors"
 	"io"
@@ -15,20 +14,20 @@ import (
 // call returns. The whole write path is serialized by a mutex, so several
 // goroutines may write without interleaving event bytes.
 //
-// A stream created with WithRequest compresses events with gzip when the
-// request accepts it. The gzip writer is flushed after every event.
+// A stream created with WithRequest compresses events with brotli or gzip
+// when the request accepts either. The compressor is flushed after every event.
 type Stream struct {
-	mu       sync.Mutex
-	w        http.ResponseWriter
-	rc       *http.ResponseController
-	ctx      context.Context
-	request  *http.Request
-	compress bool
-	gz       *gzip.Writer
-	gzClosed bool
-	started  bool
-	closed   bool
-	err      error
+	mu               sync.Mutex
+	w                http.ResponseWriter
+	rc               *http.ResponseController
+	ctx              context.Context
+	request          *http.Request
+	encoding         string
+	compressor       compressor
+	compressorClosed bool
+	started          bool
+	closed           bool
+	err              error
 }
 
 // StreamOption configures a Stream.
@@ -54,7 +53,7 @@ func New(w http.ResponseWriter, opts ...StreamOption) *Stream {
 		opt(s)
 	}
 	if s.request != nil && s.request.Method != http.MethodHead {
-		s.compress = acceptsGzip(s.request.Header.Get("Accept-Encoding"))
+		s.encoding = selectEncoding(s.request.Header.Get("Accept-Encoding"))
 	}
 	return s
 }
@@ -86,9 +85,9 @@ func (s *Stream) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.closed = true
-	if s.gz != nil && !s.gzClosed {
-		s.gzClosed = true
-		if err := s.gz.Close(); err != nil && s.err == nil {
+	if s.compressor != nil && !s.compressorClosed {
+		s.compressorClosed = true
+		if err := s.compressor.Close(); err != nil && s.err == nil {
 			s.err = err
 		}
 	}
@@ -124,10 +123,10 @@ func (s *Stream) prepareLocked() error {
 	}
 
 	header := s.w.Header()
-	if s.compress && header.Get("Content-Encoding") == "" &&
+	if s.encoding != "" && header.Get("Content-Encoding") == "" &&
 		!hasDirective(header.Get("Cache-Control"), "no-transform") {
-		s.gz = gzip.NewWriter(s.w)
-		header.Set("Content-Encoding", "gzip")
+		s.compressor = newCompressor(s.encoding, s.w)
+		header.Set("Content-Encoding", s.encoding)
 		addVary(header)
 	}
 	header.Set("Content-Type", contentTypeEventStream)
@@ -145,14 +144,14 @@ func (s *Stream) writeLocked(event []byte) error {
 		return err
 	}
 	writer := io.Writer(s.w)
-	if s.gz != nil {
-		writer = s.gz
+	if s.compressor != nil {
+		writer = s.compressor
 	}
 	if _, err := writer.Write(event); err != nil {
 		return s.failLocked(err)
 	}
-	if s.gz != nil {
-		if err := s.gz.Flush(); err != nil {
+	if s.compressor != nil {
+		if err := s.compressor.Flush(); err != nil {
 			return s.failLocked(err)
 		}
 	}

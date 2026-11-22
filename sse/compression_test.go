@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/andybalholm/brotli"
 	"github.com/matbur/stargo/sse"
 )
 
@@ -34,24 +35,38 @@ func decodeGzip(t *testing.T, body []byte) string {
 	return string(decoded)
 }
 
-func TestGzipNegotiation(t *testing.T) {
+func decodeBrotli(t *testing.T, body []byte) string {
+	t.Helper()
+	decoded, err := io.ReadAll(brotli.NewReader(bytes.NewReader(body)))
+	if err != nil {
+		t.Fatalf("brotli decode error = %v", err)
+	}
+	return string(decoded)
+}
+
+func TestEncodingNegotiation(t *testing.T) {
 	t.Parallel()
 
-	cases := map[string]bool{
-		"gzip":          true,
-		"GZIP":          true,
-		"x-gzip":        true,
-		"br, gzip;q=0":  false,
-		"gzip;q=0":      false,
-		"gzip;q=0.5":    true,
-		"*":             true,
-		"*;q=0":         false,
-		"*;q=0, gzip":   true,
-		"br":            false,
-		"":              false,
-		"gzip;q=bogus":  false,
-		"identity":      false,
-		"gzip, *;q=0.1": true,
+	cases := map[string]string{
+		"gzip":                 "gzip",
+		"GZIP":                 "gzip",
+		"x-gzip":               "gzip",
+		"br":                   "br",
+		"BR":                   "br",
+		"br, gzip":             "br",
+		"gzip, br":             "br",
+		"br;q=0.2, gzip;q=0.9": "gzip",
+		"br;q=0.9, gzip;q=0.2": "br",
+		"br;q=0, gzip":         "gzip",
+		"gzip;q=0":             "",
+		"br;q=0":               "",
+		"*":                    "br",
+		"*;q=0":                "",
+		"*;q=0, gzip":          "gzip",
+		"identity":             "",
+		"":                     "",
+		"gzip;q=bogus":         "",
+		"gzip, *;q=0.1":        "gzip",
 	}
 	for header, want := range cases {
 		recorder := httptest.NewRecorder()
@@ -59,9 +74,8 @@ func TestGzipNegotiation(t *testing.T) {
 		if err := stream.PatchElements("<div>x</div>"); err != nil {
 			t.Fatalf("%q: PatchElements() error = %v", header, err)
 		}
-		compressed := recorder.Header().Get("Content-Encoding") == "gzip"
-		if compressed != want {
-			t.Errorf("%q: compressed = %v, want %v", header, compressed, want)
+		if got := recorder.Header().Get("Content-Encoding"); got != want {
+			t.Errorf("%q: Content-Encoding = %q, want %q", header, got, want)
 		}
 	}
 }
@@ -106,6 +120,36 @@ func TestGzipStreamHeadersAndBody(t *testing.T) {
 	}
 	if strings.Index(body, "first") > strings.Index(body, "second") {
 		t.Fatalf("events are out of order: %q", body)
+	}
+}
+
+func TestBrotliStreamHeadersAndBody(t *testing.T) {
+	t.Parallel()
+
+	recorder := httptest.NewRecorder()
+	stream := sse.New(recorder, sse.WithRequest(streamRequest("br")))
+	if err := stream.PatchElements("<div>first</div>"); err != nil {
+		t.Fatalf("PatchElements() error = %v", err)
+	}
+	if err := stream.PatchSignals(map[string]any{"count": 2}); err != nil {
+		t.Fatalf("PatchSignals() error = %v", err)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	if got := recorder.Header().Get("Content-Encoding"); got != "br" {
+		t.Fatalf("Content-Encoding = %q", got)
+	}
+	if got := recorder.Header().Get("Vary"); got != "Accept-Encoding" {
+		t.Fatalf("Vary = %q", got)
+	}
+	body := decodeBrotli(t, recorder.Body.Bytes())
+	if !strings.Contains(body, "data: elements <div>first</div>") {
+		t.Fatalf("body missing element patch: %q", body)
+	}
+	if !strings.Contains(body, `data: signals {"count":2}`) {
+		t.Fatalf("body missing signal patch: %q", body)
 	}
 }
 

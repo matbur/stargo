@@ -4,6 +4,7 @@
 // encoded into one buffer, written once, and flushed, so the client receives
 // complete events as soon as they are produced.
 //
-// A stream created with WithRequest compresses events with gzip when the
-// request accepts it. Ctx.Stream passes the request automatically.
+// A stream created with WithRequest compresses events with brotli or gzip
+// when the request accepts either. Ctx.Stream passes the request
+// automatically.
 package sse
