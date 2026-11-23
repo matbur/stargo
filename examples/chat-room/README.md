@@ -4,9 +4,10 @@ A multi-feature Stargo application: a lobby, one chat page per room, SQLite
 persistence, a per-tab visitor identity, and live Datastar updates over
 Server-Sent Events.
 
-The module is separate from the framework on purpose. The core keeps one direct
-dependency (`maragu.dev/gomponents`); this example adds `modernc.org/sqlite`
-through a `replace` directive. Read it as the step after
+The module is separate from the framework on purpose. The core keeps two
+direct dependencies (`maragu.dev/gomponents` for HTML and
+`github.com/andybalholm/brotli` for stream compression); this example adds
+`modernc.org/sqlite` through a `replace` directive. Read it as the step after
 [`../hello`](../hello/) and [`../hello-world`](../hello-world/).
 
 ## Run
