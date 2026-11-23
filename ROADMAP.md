@@ -1,7 +1,8 @@
 # Stargo roadmap
 
-Status: sections 1–4, 5.1, 5.2, and 5.3 are implemented. The rest of section 5
-lists optional work that stays out until a concrete example needs it.
+Status: sections 1–4 and 5.1–5.3 are implemented, plus the session half of 5.4.
+The rest of section 5 lists optional work that stays out until a concrete
+example needs it.
 
 Reference: `stario/` (Python, local clone, not part of this repository).
 Compare against the current Go packages.
@@ -211,11 +212,17 @@ Suggested change: `add-static-assets` (done).
 
 ### 5.4 Authentication and sessions
 
+Status: the `session` package is implemented in `add-sessions` with a memory
+store and the middleware. Authentication, CSRF, flash messages, and a durable
+store example remain.
+
 Current state: `cookies` provides `Set`, `Delete`, `Read`, and `SignedCookie`
-with key rotation, prefix validation, and the standard attributes. There is no
-session store, no login flow, no user abstraction, no CSRF token, and no
-password hashing helper. The chat-room example mints a display identity from
-query parameters and Datastar signals; that is not authentication.
+with key rotation, prefix validation, and the standard attributes. `session`
+adds a cookie-backed id, a store contract, `MemoryStore`, sliding and absolute
+expiration, rotation, destruction, and loading middleware. There is no login
+flow, no user abstraction, no CSRF token, and no password hashing helper. The
+chat-room example mints a display identity from query parameters and Datastar
+signals; that is not authentication.
 
 Gap: an application cannot keep a server-side session across requests, log a
 user out, rotate a session on privilege change, or protect a mutating form from
@@ -244,8 +251,9 @@ foundation; authentication is a separate, thinner change on top.
 Trigger: a real account model, an admin area, or any multi-user example where
 the chat-room's minted identity is no longer acceptable.
 
-Suggested change: `add-sessions`, then `add-auth-middleware` if the login flow
-warrants its own change.
+Suggested change: `add-sessions` (done), then `add-auth-middleware` if the login
+flow warrants its own change. A durable SQLite store can follow as its own
+change.
 
 ### 5.5 Replay and cross-process relay
 

@@ -403,6 +403,55 @@ for one max age. The signing key is derived from the configured key and the
 cookie name, so one secret can serve several cookies. Defaults are a 14-day max
 age, path `/`, `Secure`, `HttpOnly`, and `SameSite=Lax`.
 
+## Sessions
+
+`session` keeps state on the server and only an opaque id in a cookie. Register
+the middleware before serving:
+
+```go
+store := session.NewMemoryStore()
+manager, err := session.New(store)
+if err != nil {
+	return err
+}
+app.Use(manager.Middleware())
+```
+
+Read and write the session in a handler:
+
+```go
+s := session.FromRequest(c.R)
+s.Set("user_id", 42)
+userID, ok := session.Value[int](s, "user_id")
+```
+
+The cookie is written on the first modification, so change the session before
+writing the response. On later requests the middleware loads the record and
+saves it again with a slid idle deadline. Defaults are `__Host-session`,
+`Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/`, a 30-minute idle timeout, and a
+24-hour absolute lifetime. For local HTTP development, `session.Insecure()`
+renames the default cookie to `session` and drops `Secure`.
+
+Rotate on a privilege change and destroy on logout:
+
+```go
+if err := s.Rotate(); err != nil {
+	return err
+}
+s.Destroy()
+```
+
+`Store` is three methods over a `Record` with `Values`, `Created`, and
+`Expires`, so a database or Redis store can replace `MemoryStore`. Values should
+be JSON-friendly for a durable store. `MemoryStore` expires records on access
+and exposes `Sweep`; call it periodically when many short-lived sessions
+accumulate.
+
+A store load failure answers 500 before the handler runs. Saves happen after
+the response, so `session.WithErrorHandler` receives a save error instead of
+changing the status. There is no authentication, password hashing, or CSRF
+token yet; `SameSite=Lax` is the current cross-site mitigation.
+
 ## Testing
 
 `testing` serves an app on a loopback test server and gives tests a real HTTP
@@ -652,7 +701,8 @@ and how to read the numbers.
 
 ## Not included
 
-No sessions or authentication, cross-process relay, or replay. The relay and
-the tracer are process-local by design. SSE compression covers brotli and gzip;
+No authentication, password hashing, or CSRF protection; `session` covers
+server-side sessions only. No cross-process relay or replay. The relay and the
+tracer are process-local by design. SSE compression covers brotli and gzip;
 zstd stays out. Static assets are served from a fixed index; there is no
 bundler, minifier, or dev watcher.

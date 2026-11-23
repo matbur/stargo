@@ -23,6 +23,7 @@ import (
 	"github.com/matbur/stargo/assets"
 	"github.com/matbur/stargo/examples/hello/app"
 	"github.com/matbur/stargo/route"
+	"github.com/matbur/stargo/session"
 	"github.com/matbur/stargo/trace"
 )
 
@@ -941,4 +942,49 @@ func TestHandleHTTPMountsStandardHandler(t *testing.T) {
 	if statuses["/assets/missing.css"] != http.StatusNotFound {
 		t.Fatalf("missing span status = %d", statuses["/assets/missing.css"])
 	}
+}
+
+func TestSessionMiddlewareWithCtx(t *testing.T) {
+	t.Parallel()
+
+	app := newApp(t)
+	store := session.NewMemoryStore()
+	manager, err := session.New(store, session.Insecure())
+	if err != nil {
+		t.Fatalf("session.New() error = %v", err)
+	}
+	app.Use(manager.Middleware())
+	app.HandleFunc("/", func(c *stargo.Ctx) error {
+		s := session.FromRequest(c.R)
+		if _, ok := session.Value[string](s, "user"); !ok {
+			s.Set("user", "alice")
+			return c.Text("new")
+		}
+		user, _ := session.Value[string](s, "user")
+		return c.Text(user)
+	})
+
+	first := sessionServe(app)
+	if first.Code != http.StatusOK || first.Body.String() != "new" {
+		t.Fatalf("first = %d %q", first.Code, first.Body.String())
+	}
+	cookies := (&http.Response{Header: first.Header()}).Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("first Set-Cookie = %v", cookies)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.AddCookie(&http.Cookie{Name: cookies[0].Name, Value: cookies[0].Value})
+	second := httptest.NewRecorder()
+	app.ServeHTTP(second, request)
+	if second.Code != http.StatusOK || second.Body.String() != "alice" {
+		t.Fatalf("second = %d %q", second.Code, second.Body.String())
+	}
+}
+
+func sessionServe(handler http.Handler) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	return recorder
 }
