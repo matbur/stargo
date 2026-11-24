@@ -112,7 +112,7 @@ func (s *Session) Set(key string, value any) {
 	}
 	s.data[key] = value
 	s.used = true
-	if s.new {
+	if s.new && !s.cookieWrote {
 		s.writeCookieLocked()
 	}
 }

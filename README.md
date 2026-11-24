@@ -449,8 +449,53 @@ accumulate.
 
 A store load failure answers 500 before the handler runs. Saves happen after
 the response, so `session.WithErrorHandler` receives a save error instead of
-changing the status. There is no authentication, password hashing, or CSRF
-token yet; `SameSite=Lax` is the current cross-site mitigation.
+changing the status.
+
+## Authentication
+
+`auth` turns a verified login into an authenticated request. Passwords are
+hashed with argon2id and verified in constant time:
+
+```go
+hash, err := auth.HashPassword(password)
+if err != nil {
+	return err
+}
+ok, err := auth.VerifyPassword(submitted, hash)
+```
+
+The PHC string carries the version and parameters, so every hash uses a fresh
+salt while old hashes keep verifying. A malformed hash returns
+`auth.ErrInvalidHash`; a wrong password returns false without an error.
+
+`Login` rotates the session id and stores a JSON `auth.User`; `Logout`
+destroys the session:
+
+```go
+if err := auth.Login(session.FromRequest(c.R), auth.User{ID: "u1", Name: "Alice"}); err != nil {
+	return err
+}
+auth.Logout(session.FromRequest(c.R))
+```
+
+`RequireUser` guards handlers that need a user. It answers 401 by default, or
+redirects with 303 when a path is configured:
+
+```go
+app.Use(manager.Middleware())
+app.Use(auth.RequireUser(auth.RedirectTo("/login")))
+```
+
+The session middleware must run first so `RequireUser` sees the session.
+`auth.Unauthorized` replaces the default response. A redirect wins over the
+custom handler. A missing, malformed, or id-less stored user counts as
+unauthenticated, so the gate fails closed.
+
+Argon2id is deliberately expensive (64 MiB per verification). Rate-limit a
+public login endpoint. There is no registration, password reset, user store, or
+CSRF token yet; `SameSite=Lax` is the current cross-site mitigation.
+[`examples/auth`](examples/auth/) shows the full login, protected page, and
+logout flow.
 
 ## Testing
 
@@ -665,23 +710,26 @@ drains every queue before closing the file or the HTTP client.
 
 ## Examples
 
-Three runnable examples build up the framework:
+Four runnable examples build up the framework:
 
 | Example | Shows |
 |---|---|
 | [`examples/hello-world`](examples/hello-world/) | One route, one handler, one page, no JavaScript |
 | [`examples/hello`](examples/hello/) | The live-page model with Datastar and a relay |
 | [`examples/chat-room`](examples/chat-room/) | Lobby, per-room pages, SQLite, identity, and live streams |
+| [`examples/auth`](examples/auth/) | Password login, a server-side session, a protected page, and logout |
 
 ```sh
 make run-hello-world   # http://localhost:8080
 make run              # the counter from examples/hello
 make run-chat-room    # the chat room, with its own module
+make run-auth         # the login example
 ```
 
 `examples/chat-room` is a separate Go module so SQLite never becomes a
 dependency of the framework. Its README covers routes, persistence, and the
-pinned Datastar CDN requirement; `make test-examples` runs both example gates.
+pinned Datastar CDN requirement. `make test-examples` runs the hello-world
+tests, the auth tests, and the full chat-room gate.
 
 ## Development
 
@@ -692,7 +740,7 @@ go build ./...
 ```
 
 `make test`, `make vet`, `make race`, `make build`, and `make run` wrap the same
-commands. `make test-examples` runs the hello-world tests and the full
+commands. `make test-examples` runs the hello-world and auth tests and the full
 chat-room gate inside its module.
 
 `make bench` runs the rendering microbenchmarks and the in-process HTTP/SSE
@@ -701,8 +749,8 @@ and how to read the numbers.
 
 ## Not included
 
-No authentication, password hashing, or CSRF protection; `session` covers
-server-side sessions only. No cross-process relay or replay. The relay and the
-tracer are process-local by design. SSE compression covers brotli and gzip;
-zstd stays out. Static assets are served from a fixed index; there is no
-bundler, minifier, or dev watcher.
+No CSRF protection, registration, password reset, or user store;
+`session` and `auth` cover server-side sessions and a login gate. No
+cross-process relay or replay. The relay and the tracer are process-local by
+design. SSE compression covers brotli and gzip; zstd stays out. Static assets
+are served from a fixed index; there is no bundler, minifier, or dev watcher.

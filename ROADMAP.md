@@ -1,8 +1,9 @@
 # Stargo roadmap
 
-Status: sections 1–4 and 5.1–5.3 are implemented, plus the session half of 5.4.
-The rest of section 5 lists optional work that stays out until a concrete
-example needs it.
+Status: sections 1–4 and 5.1–5.4 are implemented. CSRF, flash messages, a
+durable session store, relay replay/transports, and debug/filesystem helpers
+remain. The rest of section 5 lists optional work that stays out until a
+concrete example needs it.
 
 Reference: `stario/` (Python, local clone, not part of this repository).
 Compare against the current Go packages.
@@ -212,38 +213,42 @@ Suggested change: `add-static-assets` (done).
 
 ### 5.4 Authentication and sessions
 
-Status: the `session` package is implemented in `add-sessions` with a memory
-store and the middleware. Authentication, CSRF, flash messages, and a durable
-store example remain.
+Status: `session` is implemented in `add-sessions` and `auth` in
+`add-auth-middleware`. CSRF, flash messages, a durable store example, and a
+user store remain.
 
 Current state: `cookies` provides `Set`, `Delete`, `Read`, and `SignedCookie`
 with key rotation, prefix validation, and the standard attributes. `session`
 adds a cookie-backed id, a store contract, `MemoryStore`, sliding and absolute
-expiration, rotation, destruction, and loading middleware. There is no login
-flow, no user abstraction, no CSRF token, and no password hashing helper. The
-chat-room example mints a display identity from query parameters and Datastar
-signals; that is not authentication.
+expiration, rotation, destruction, and loading middleware. `auth` adds argon2id
+password hashing, constant-time verification, session-backed `Login`/`Logout`,
+and the `RequireUser` gate with a redirect or a custom unauthorized response.
+The chat-room example mints a display identity from query parameters and
+Datastar signals; that is not authentication.
 
-Gap: an application cannot keep a server-side session across requests, log a
-user out, rotate a session on privilege change, or protect a mutating form from
-CSRF. It also has no ready-made middleware that answers 401 or redirects to a
-login page.
+Gap: an application still has no CSRF token for mutating forms, no registration
+or user store, and no durable session store example. `RequireUser` and argon2id
+login already cover the request gate.
 
 Scope a change would cover:
 
 - A `session` package: cookie-backed session ID, `__Host-` prefix, pluggable
   store, memory store plus one durable example (SQLite), sliding expiration,
   absolute expiration, rotation on login, `Destroy`, and a per-session data map.
-- Store contract that is small enough for Redis or a database later.
+  (Done in `add-sessions`.)
+- Store contract that is small enough for Redis or a database later. (Done.)
 - Session loading middleware that attaches the session to the request context
   and saves it after the handler, with `SameSite=Lax` and `Secure` defaults.
+  (Done.)
 - Auth helpers: password hashing with argon2id, constant-time verification, a
   login handler, a logout handler, and `RequireUser` middleware with a
-  configurable unauthorized response.
+  configurable unauthorized response. (Done in `add-auth-middleware`.)
 - CSRF: double-submit token bound to the session, hidden input helper, and
   validation middleware for unsafe methods, including the Datastar POST paths
-  the examples use.
+  the examples use. (Remaining.)
 - Flash messages on top of the session data map, if the examples need them.
+  (Remaining.)
+- A durable SQLite session store example. (Remaining.)
 
 Depends on: `cookies`, which is already implemented. Sessions are the
 foundation; authentication is a separate, thinner change on top.
@@ -251,9 +256,9 @@ foundation; authentication is a separate, thinner change on top.
 Trigger: a real account model, an admin area, or any multi-user example where
 the chat-room's minted identity is no longer acceptable.
 
-Suggested change: `add-sessions` (done), then `add-auth-middleware` if the login
-flow warrants its own change. A durable SQLite store can follow as its own
-change.
+Suggested change: `add-sessions` and `add-auth-middleware` (both done), then
+`add-csrf-protection`, a durable session store, and flash messages if an
+example needs them.
 
 ### 5.5 Replay and cross-process relay
 
@@ -349,4 +354,4 @@ its trigger appears, and open one change per entry rather than one large
 2. `add-cookie-helpers` — done
 3. `add-datastar-extra-attributes` — done
 4. `add-testing-client` — done
-5. Optional items as needed (5.1 done)
+5. Optional items as needed (5.1–5.4 done)
